@@ -129,40 +129,19 @@ is_short = (
 )
     })
 
-    videos.append({
-        "video_id": item["id"],
-        "title": snippet.get("title"),
-        "description": snippet.get("description"),
-        "channel_title": snippet.get("channelTitle"),
-        "published_at": snippet.get("publishedAt"),
-        "url": f"https://www.youtube.com/watch?v={item['id']}",
-        "view_count": int(stats.get("viewCount", 0)),
-        "thumbnail_url": thumb_url,
-        "duration_sec": duration_secs,
-        "is_short": is_short,
-    })
-
-    })
-
-        channel_id = snippet.get("channelId")
-        if channel_id:
-            channel_ids.add(channel_id)
-
-        videos.append(
-            {
-                "video_id": item["id"],
-                "title": snippet.get("title"),
-                "description": snippet.get("description"),
-                "channel_title": snippet.get("channelTitle"),
-                "channel_id": channel_id,
-                "published_at": snippet.get("publishedAt"),
-                "url": f"https://www.youtube.com/watch?v={item['id']}",
-                "view_count": int(stats.get("viewCount", 0)),
-                "thumbnail_url": thumb_url,
-                "duration_seconds": duration_secs,
-                "is_short": is_short,
-            }
-        )
+videos.append({
+    "video_id": item["id"],
+    "title": snippet.get("title"),
+    "description": snippet.get("description"),
+    "channel_title": snippet.get("channelTitle"),
+    "published_at": snippet.get("publishedAt"),
+    "url": f"https://www.youtube.com/watch?v={item['id']}",
+    "view_count": int(stats.get("viewCount", 0)),
+    "thumbnail_url": thumb_url,
+    "duration_sec": duration_secs,
+    "is_short": is_short,
+    "is_vertical": is_vertical
+})
 
     # Fetch channel logos + country
     channel_info = {}
