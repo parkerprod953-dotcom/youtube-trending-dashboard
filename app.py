@@ -81,19 +81,25 @@ def fetch_trending_news_ca(max_results: int = 50):
     channel_ids = set()
 
     for item in data.get("items", []):
-        snippet = item["snippet"]
-        stats = item.get("statistics", {})
-        details = item.get("contentDetails", {})
-        thumbs = snippet.get("thumbnails", {})
+details = item.get("contentDetails", {})
+thumbs = snippet.get("thumbnails", {})
 
-        thumb_url = (
-            thumbs.get("medium", {}).get("url")
-            or thumbs.get("high", {}).get("url")
-            or thumbs.get("default", {}).get("url")
-        )
+thumb_url = (
+    thumbs.get("medium", {}).get("url")
+    or thumbs.get("high", {}).get("url")
+    or thumbs.get("default", {}).get("url")
+)
 
-        duration_secs = _parse_iso8601_duration(details.get("duration", "PT0S"))
-        is_short = duration_secs <= 60  # rough but good enough
+duration_secs = _parse_iso8601_duration(details.get("duration", "PT0S"))
+
+# --- improved Shorts detection ---
+text = (snippet.get("title", "") + " " + snippet.get("description", "")).lower()
+marked_as_shorts = "#shorts" in text or " #short " in text
+
+# Treat as Short if:
+# - Creator marks it as #shorts (any length up to 3 min)
+# - OR it's very short (e.g. <= 75s) even without the tag
+is_short = marked_as_shorts or duration_secs <= 75
 
         channel_id = snippet.get("channelId")
         if channel_id:
