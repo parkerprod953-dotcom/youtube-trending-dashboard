@@ -81,25 +81,68 @@ def fetch_trending_news_ca(max_results: int = 50):
     channel_ids = set()
 
     for item in data.get("items", []):
-details = item.get("contentDetails", {})
-thumbs = snippet.get("thumbnails", {})
+    snippet = item.get("snippet", {})
+    stats = item.get("statistics", {})
+    details = item.get("contentDetails", {})
+    thumbs = snippet.get("thumbnails", {})
 
-thumb_url = (
-    thumbs.get("medium", {}).get("url")
-    or thumbs.get("high", {}).get("url")
-    or thumbs.get("default", {}).get("url")
+    # Pick best thumbnail + get its dimensions
+    thumb_obj = (
+        thumbs.get("medium", {})
+        or thumbs.get("high", {})
+        or thumbs.get("default", {})
+    )
+    thumb_url = thumb_obj.get("url")
+    thumb_w = thumb_obj.get("width")
+    thumb_h = thumb_obj.get("height")
+
+    # Vertical detection – treat clearly tall thumbnails as vertical
+    if thumb_w and thumb_h:
+        aspect = thumb_w / thumb_h
+        is_vertical = aspect < 0.9   # <1.0 = taller than wide; 0.9 for a bit of tolerance
+    else:
+        is_vertical = False
+
+    # Duration
+    duration_secs = _parse_iso8601_duration(details.get("duration", "PT0S"))
+# --- improved Shorts detection ---
+# Combine text for easier keyword scanning
+text = (snippet.get("title", "") + " " + snippet.get("description", "")).lower()
+
+# Detect #short / #shorts literally
+marked_as_shorts = (
+    "#shorts" in text
+    or "#short " in text.replace("#shorts", "")
 )
 
-duration_secs = _parse_iso8601_duration(details.get("duration", "PT0S"))
+# Vertical detection — tall thumbnails = likely Shorts
+is_vertical = False
+if thumb_w and thumb_h:
+    aspect = thumb_w / thumb_h
+    is_vertical = aspect < 0.9  # clearly vertical
 
-# --- improved Shorts detection ---
-text = (snippet.get("title", "") + " " + snippet.get("description", "")).lower()
-marked_as_shorts = "#shorts" in text or " #short " in text
+# FINAL Shorts classification
+is_short = (
+    duration_secs <= 75
+    or marked_as_shorts
+    or is_vertical
+)
+    })
 
-# Treat as Short if:
-# - Creator marks it as #shorts (any length up to 3 min)
-# - OR it's very short (e.g. <= 75s) even without the tag
-is_short = marked_as_shorts or duration_secs <= 75
+    videos.append({
+        "video_id": item["id"],
+        "title": snippet.get("title"),
+        "description": snippet.get("description"),
+        "channel_title": snippet.get("channelTitle"),
+        "published_at": snippet.get("publishedAt"),
+        "url": f"https://www.youtube.com/watch?v={item['id']}",
+        "view_count": int(stats.get("viewCount", 0)),
+        "thumbnail_url": thumb_url,
+        "duration_sec": duration_secs,
+        "is_short": is_short,
+    })
+
+    })
 
         channel_id = snippet.get("channelId")
         if channel_id:
