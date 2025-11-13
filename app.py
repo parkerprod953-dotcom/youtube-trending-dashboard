@@ -127,7 +127,6 @@ is_short = (
     or marked_as_shorts
     or is_vertical
 )
-    })
 
 videos.append({
     "video_id": item["id"],
