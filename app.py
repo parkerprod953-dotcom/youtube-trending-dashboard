@@ -321,19 +321,19 @@ def main():
     # --- SIMPLE PASSWORD GATE ---
     expected_pwd = st.secrets.get("DASHBOARD_PASSWORD")
     if expected_pwd:
-        if "authed" not in st.session_state:
-            st.session_state.authed = False
+    if "authed" not in st.session_state:
+        st.session_state.authed = False
 
-        if not st.session_state.authed:
-            pwd = st.text_input("Enter dashboard password", type="password")
-            if st.button("Submit"):
-                if pwd == expected_pwd:
-                    st.session_state.authed = True
-                    st.experimental_rerun()
-                else:
-                    st.error("Incorrect password.")
-            # stop rendering the rest of the app until authed
-            return
+    if not st.session_state.authed:
+        pwd = st.text_input("Enter dashboard password", type="password")
+        if st.button("Submit"):
+            if pwd == expected_pwd:
+                st.session_state.authed = True
+                st.rerun()   # 👈 use this instead of experimental_rerun
+            else:
+                st.error("Incorrect password.")
+        return
+
     # ----------------------------
 
     st.caption(
