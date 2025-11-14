@@ -1,9 +1,11 @@
-import requests
+import re
 from datetime import datetime, timedelta, timezone
-import pytz
-import html
+
 import pandas as pd
+import pytz
+import requests
 import streamlit as st
+import html
 
 # -----------------------------
 # Config & helpers
@@ -29,16 +31,29 @@ def yt_get(endpoint, params):
 
 
 def parse_iso8601_duration(duration_str: str) -> int:
-    # crude but good enough for YouTube style durations
+    """Minimal ISO-8601 duration parser for YouTube strings like PT1H2M3S."""
     if not duration_str:
         return 0
-    import isoduration
-    try:
-        dur = isoduration.parse_duration(duration_str)
-        return int(dur.total_seconds())
-    except Exception:
-        # fallback: 0 if parse fails
+
+    pattern = re.compile(
+        r"P"
+        r"(?:(?P<days>\d+)D)?"
+        r"(?:T"
+        r"(?:(?P<hours>\d+)H)?"
+        r"(?:(?P<minutes>\d+)M)?"
+        r"(?:(?P<seconds>\d+)S)?"
+        r")?"
+    )
+    m = pattern.fullmatch(duration_str)
+    if not m:
         return 0
+
+    days = int(m.group("days") or 0)
+    hours = int(m.group("hours") or 0)
+    minutes = int(m.group("minutes") or 0)
+    seconds = int(m.group("seconds") or 0)
+    total = (((days * 24 + hours) * 60) + minutes) * 60 + seconds
+    return total
 
 
 def format_duration(seconds: int) -> str:
@@ -308,10 +323,9 @@ if not st.session_state["unlocked"]:
     st.title("YouTube News & Politics – Trending Dashboard")
     pwd = st.text_input("Enter dashboard password", type="password")
     if st.button("Unlock"):
-        # simple shared password; adjust if you use something else
         if pwd.strip() == st.secrets.get("DASHBOARD_PASSWORD", ""):
             st.session_state["unlocked"] = True
-            st.experimental_rerun()
+            st.rerun()   # <-- updated from st.experimental_rerun()
         else:
             st.error("Incorrect password.")
     st.stop()
@@ -515,7 +529,7 @@ st.markdown(
 st.caption("Data auto-refreshes every ~3 hours. Use the button below to reload now.")
 if st.button("🔄 Refresh data now"):
     fetch_trending_news.clear()
-    st.experimental_rerun()
+    st.rerun()
 
 df_all = fetch_trending_news()
 
