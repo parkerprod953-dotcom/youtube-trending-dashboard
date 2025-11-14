@@ -183,63 +183,70 @@ def load_data(api_key: str):
 # -----------------------------
 
 def render_card(row, channel_info):
-    """Render a single video as a nice card using native Streamlit layout."""
+    """Render a single video as a modern card using Streamlit layout only."""
     cid = row.get("channel_id")
     info = channel_info.get(cid, {}) if cid else {}
     logo_url = info.get("logo")
     country = info.get("country")
 
+    # Origin text
     if country == "CA":
         origin = "🇨🇦 Canadian outlet"
     elif country:
         origin = f"🌍 {country} outlet"
     else:
-        origin = "🌍 Country unknown"
+        origin = "🌍 outlet (country unknown)"
 
+    # Metrics
     views = int(row.get("view_count", 0))
-    views_text = f"{format_views(views)} views"
+    views_text = f"👁️ {format_views(views)}"
+    duration = int(row.get("duration_sec", 0))
+    duration_text = f"⏱️ {duration // 60}:{duration % 60:02d}" if duration > 0 else "⏱️ live"
+    age_text = f"🕒 {format_time_ago(row.get('published_at', ''))}"
 
+    # Hot badge
     badge = ""
     if views >= 1_000_000:
         badge = "🔥"
     elif views >= 200_000:
         badge = "⭐"
 
-    duration = int(row.get("duration_sec", 0))
-    duration_text = f"{duration // 60}:{duration % 60:02d}" if duration > 0 else "live"
-
-    age_text = format_time_ago(row.get("published_at", ""))
+    title = row.get("title") or "Untitled"
+    url = row.get("url")
 
     with st.container():
-        col_thumb, col_info = st.columns([1, 3])
+        # Outer layout
+        left, right = st.columns([1.4, 3])
 
-        with col_thumb:
+        with left:
             if row.get("thumbnail_url"):
                 st.image(row.get("thumbnail_url"), use_column_width=True)
 
-        with col_info:
-            # Title with link
-            title = row.get("title") or "Untitled"
-            url = row.get("url")
+        with right:
+            # Title row
             if url:
-                title_md = f"[{title}]({url})"
+                st.markdown(f"#### [{title}]({url}) {badge}")
             else:
-                title_md = title
+                st.markdown(f"#### {title} {badge}")
 
-            st.markdown(f"**{title_md}** {badge}")
+            # Metrics row
+            metric_cols = st.columns([1, 1, 1])
+            with metric_cols[0]:
+                st.caption(views_text)
+            with metric_cols[1]:
+                st.caption(duration_text)
+            with metric_cols[2]:
+                st.caption(age_text)
 
-            st.markdown(f"{views_text} · {duration_text} · {age_text}")
+            # Channel row
+            ch_cols = st.columns([0.15, 0.85])
+            with ch_cols[0]:
+                if logo_url:
+                    st.image(logo_url, width=28)
+            with ch_cols[1]:
+                st.markdown(f"**{row.get('channel_title')}**  ·  {origin}")
 
-            if logo_url:
-                logo_col, text_col = st.columns([0.15, 0.85])
-                with logo_col:
-                    st.image(logo_url, width=26)
-                with text_col:
-                    st.markdown(f"{row.get('channel_title')} · {origin}")
-            else:
-                st.markdown(f"{row.get('channel_title')} · {origin}")
-
-    st.markdown("---")
+    st.divider()
 
 
 # -----------------------------
@@ -298,8 +305,10 @@ def main():
                 render_card(row, channel_info)
 
     with tab3:
-        st.dataframe(df.sort_values("view_count", ascending=False),
-                     use_container_width=True)
+        st.dataframe(
+            df.sort_values("view_count", ascending=False),
+            use_container_width=True,
+        )
 
 
 if __name__ == "__main__":
