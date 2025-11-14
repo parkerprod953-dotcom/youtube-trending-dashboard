@@ -82,14 +82,14 @@ def humanize_timedelta(td) -> str:
     return f"{weeks} week ago" if weeks == 1 else f"{weeks} weeks ago"
 
 
-def description_snippet_words(text: str, max_words: int = 200) -> str:
-    """Trim description to N words for preview."""
+def description_snippet(text: str, max_chars: int = 260) -> str:
+    """Short description preview, character-based."""
     if not text:
         return ""
-    words = text.strip().split()
-    if len(words) <= max_words:
-        return " ".join(words)
-    return " ".join(words[:max_words]) + "…"
+    text = " ".join(text.strip().split())
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rsplit(" ", 1)[0] + "…"
 
 
 # ---------------------------------------------------------------------
@@ -244,10 +244,8 @@ def load_data():
     df["views_str"] = df["view_count"].apply(format_views)
     df["duration_str"] = df["duration_sec"].apply(format_duration)
 
-    # Description preview (200-word snippet)
-    df["description_snippet"] = df["description"].apply(
-        lambda t: description_snippet_words(t, max_words=200)
-    )
+    # Description preview (~260 characters)
+    df["description_snippet"] = df["description"].apply(description_snippet)
 
     # Channel metadata
     df["channel_country"] = df["channel_id"].map(
@@ -286,29 +284,6 @@ def filter_by_outlet(df, outlet_filter: str):
 # ---------------------------------------------------------------------
 
 
-def inject_base_css():
-    """Force light look & style cards."""
-    st.markdown(
-        f"""
-<style>
-:root {{
-  color-scheme: light;
-}}
-html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], [data-testid="stHeader"] {{
-  background-color: #f9fafb !important;
-  color: #0f172a !important;
-}}
-
-a {{
-  color: #0f6ddf;
-}}
-
-</style>
-""",
-        unsafe_allow_html=True,
-    )
-
-
 def badges_for_row(row, rank=None):
     badges = []
     if rank is not None and rank <= 3:
@@ -319,7 +294,7 @@ def badges_for_row(row, rank=None):
 
 
 def render_video_list(df, label_metric=None, label_metric_title=None):
-    """Render list of videos as sleek cards with clickable thumbnails + expand description."""
+    """Render list of videos as cards. Thumbnails are clickable."""
     if df.empty:
         st.info("No videos to show for this filter.")
         return
@@ -332,12 +307,12 @@ def render_video_list(df, label_metric=None, label_metric_title=None):
 
         with cols[0]:
             if row["thumbnail_url"]:
-                # Clickable thumbnail
+                # 🔗 Clickable thumbnail (opens video in new tab)
                 st.markdown(
                     f"""
 <a href="{url}" target="_blank">
   <img src="{row['thumbnail_url']}"
-       style="width:100%;max-width:240px;border-radius:10px;object-fit:cover;" />
+       style="width:100%;max-width:260px;border-radius:10px;object-fit:cover;" />
 </a>
 """,
                     unsafe_allow_html=True,
@@ -381,21 +356,17 @@ def render_video_list(df, label_metric=None, label_metric_title=None):
                     unsafe_allow_html=True,
                 )
 
-            # Description snippet + expander for full description
-            full_desc = row.get("description") or ""
-            snippet = row.get("description_snippet") or ""
-            if snippet:
+            # Short description
+            if row.get("description_snippet"):
                 st.markdown(
-                    f"<div style='font-size:0.9rem; color:#111827; margin-bottom:0.2rem;'>"
-                    f"{snippet}"
+                    f"<div style='font-size:0.9rem; color:#111827; margin-bottom:0.35rem;'>"
+                    f"{row['description_snippet']}"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
-                if full_desc.strip() and len(full_desc.split()) > len(snippet.split()):
-                    with st.expander("Read full description"):
-                        st.write(full_desc)
 
             # Copy details helper
+            full_desc = row.get("description") or ""
             copy_text = (
                 f"Title: {row['title']}\n"
                 f"Channel: {row['channel_title']}\n"
@@ -419,8 +390,6 @@ def main():
         layout="wide",
         page_icon="📺",
     )
-
-    inject_base_css()
 
     # Top bar: refresh + note
     top_l, top_r = st.columns([1, 4])
@@ -526,7 +495,7 @@ def main():
     df_regular_base = df[df["is_regular"]]
     df_shorts_base = df[df["is_short"]]
 
-    # Tabs
+    # Tabs (including Hot last 8 hours)
     tab_reg, tab_shorts, tab_24h, tab_hot, tab_raw = st.tabs(
         ["Regular videos", "Shorts", "Last 24 hours", "🔥 Hot (last 8 hours)", "Raw table"]
     )
@@ -576,7 +545,7 @@ def main():
         df_hot = df[(df["age_hours"] <= 8) & df["is_regular"]]
         df_hot = filter_by_outlet(df_hot, outlet_filter).copy()
 
-        # views/hour = current views / hours online (with a tiny lower bound)
+        # views/hour = current views / hours online (with a tiny lower bound to avoid division by 0)
         df_hot["views_per_hour"] = df_hot["view_count"] / df_hot["age_hours"].clip(lower=0.25)
         df_hot["views_per_hour_str"] = df_hot["views_per_hour"].apply(
             lambda v: f"{v:,.0f} views/hr"
