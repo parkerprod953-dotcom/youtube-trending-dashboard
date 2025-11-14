@@ -41,21 +41,28 @@ def format_time_ago(iso_time: str) -> str:
     diff = now - dt
     secs = diff.total_seconds()
 
-    if secs < 60: return "just now"
+    if secs < 60:
+        return "just now"
     mins = secs / 60
-    if mins < 60: return f"{int(mins)} min ago"
+    if mins < 60:
+        return f"{int(mins)} min ago"
     hrs = mins / 60
-    if hrs < 24: return f"{int(hrs)} hours ago"
+    if hrs < 24:
+        return f"{int(hrs)} hours ago"
     days = hrs / 24
-    if days < 7: return f"{int(days)} days ago"
+    if days < 7:
+        return f"{int(days)} days ago"
     weeks = days / 7
-    if weeks < 4: return f"{int(weeks)} weeks ago"
+    if weeks < 4:
+        return f"{int(weeks)} weeks ago"
     return f"{int(days/30)} months ago"
 
 
 def format_views(n: int) -> str:
-    if n >= 1_000_000: return f"{n/1_000_000:.1f}M"
-    if n >= 1_000: return f"{n/1_000:.1f}K"
+    if n >= 1_000_000:
+        return f"{n/1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n/1_000:.1f}K"
     return str(n)
 
 
@@ -64,6 +71,7 @@ def format_views(n: int) -> str:
 # -----------------------------
 
 def fetch_trending(api_key: str):
+    """Fetch trending News & Politics videos in Canada."""
     url = "https://www.googleapis.com/youtube/v3/videos"
     params = {
         "part": "snippet,contentDetails,statistics",
@@ -131,6 +139,7 @@ def fetch_trending(api_key: str):
 
 
 def fetch_channel_info(api_key: str, channel_ids: set):
+    """Fetch channel logo + country for each channel ID."""
     if not channel_ids:
         return {}
 
@@ -161,10 +170,12 @@ def fetch_channel_info(api_key: str, channel_ids: set):
 
 @st.cache_data(ttl=60 * 60 * 4)
 def load_data(api_key: str):
+    """Load videos + channel info, cached for 4 hours."""
     videos, channel_ids = fetch_trending(api_key)
     channel_info = fetch_channel_info(api_key, channel_ids)
     df = pd.DataFrame(videos)
-    return df, channel_info, datetime.now(timezone.utc)
+    fetched_at = datetime.now(timezone.utc)
+    return df, channel_info, fetched_at
 
 
 # -----------------------------
@@ -172,73 +183,63 @@ def load_data(api_key: str):
 # -----------------------------
 
 def render_card(row, channel_info):
-    cid = row["channel_id"]
-    info = channel_info.get(cid, {})
-    logo = info.get("logo")
+    """Render a single video as a nice card using native Streamlit layout."""
+    cid = row.get("channel_id")
+    info = channel_info.get(cid, {}) if cid else {}
+    logo_url = info.get("logo")
     country = info.get("country")
 
-    # Country label
-    origin = "🇨🇦 Canadian outlet" if country == "CA" else f"🌍 {country or 'Unknown'}"
-
-    # Views formatting
-    views = int(row["view_count"])
-    views_str = format_views(views)
-
-    # Badge
-    badge = "🔥" if views >= 1_000_000 else ("⭐" if views >= 200_000 else "")
-
-    # Duration formatting
-    duration = row["duration_sec"]
-    if duration > 0:
-        duration_str = f"{duration // 60}:{duration % 60:02d}"
+    if country == "CA":
+        origin = "🇨🇦 Canadian outlet"
+    elif country:
+        origin = f"🌍 {country} outlet"
     else:
-        duration_str = "live"
+        origin = "🌍 Country unknown"
 
-    # Published time formatting
-    age = format_time_ago(row["published_at"])
+    views = int(row.get("view_count", 0))
+    views_text = f"{format_views(views)} views"
 
-    # Channel logo HTML
-    if logo:
-        logo_html = (
-            f'<img src="{logo}" '
-            f'style="width:20px;height:20px;border-radius:50%;'
-            f'margin-right:6px;vertical-align:middle;">'
-        )
-    else:
-        logo_html = ""
+    badge = ""
+    if views >= 1_000_000:
+        badge = "🔥"
+    elif views >= 200_000:
+        badge = "⭐"
 
-    # FINAL CARD HTML
-    html = f"""
-<div style="display:flex;gap:12px;padding:12px;border:1px solid #eee;
-            border-radius:10px;background:#fafafa;margin-bottom:12px;">
+    duration = int(row.get("duration_sec", 0))
+    duration_text = f"{duration // 60}:{duration % 60:02d}" if duration > 0 else "live"
 
-  <div style="flex:0 0 180px;">
-    <a href="{row['url']}" target="_blank">
-      <img src="{row['thumbnail_url']}" style="width:100%;border-radius:8px;">
-    </a>
-  </div>
+    age_text = format_time_ago(row.get("published_at", ""))
 
-  <div style="flex:1;">
-    <div style="font-size:16px;font-weight:600;">
-      <a href="{row['url']}" target="_blank"
-         style="color:#111;text-decoration:none;">
-        {row['title']}
-      </a> {badge}
-    </div>
+    with st.container():
+        col_thumb, col_info = st.columns([1, 3])
 
-    <div style="font-size:13px;color:#444;margin:4px 0;">
-      {views_str} views · {duration_str} · {age}
-    </div>
+        with col_thumb:
+            if row.get("thumbnail_url"):
+                st.image(row.get("thumbnail_url"), use_column_width=True)
 
-    <div style="font-size:13px;color:#444;">
-      {logo_html}{row['channel_title']} · {origin}
-    </div>
-  </div>
+        with col_info:
+            # Title with link
+            title = row.get("title") or "Untitled"
+            url = row.get("url")
+            if url:
+                title_md = f"[{title}]({url})"
+            else:
+                title_md = title
 
-</div>
-"""
+            st.markdown(f"**{title_md}** {badge}")
 
-    st.markdown(html, unsafe_allow_html=True)
+            st.markdown(f"{views_text} · {duration_text} · {age_text}")
+
+            if logo_url:
+                logo_col, text_col = st.columns([0.15, 0.85])
+                with logo_col:
+                    st.image(logo_url, width=26)
+                with text_col:
+                    st.markdown(f"{row.get('channel_title')} · {origin}")
+            else:
+                st.markdown(f"{row.get('channel_title')} · {origin}")
+
+    st.markdown("---")
 
 
 # -----------------------------
@@ -276,21 +277,29 @@ def main():
 
     st.caption(f"Last updated: {fetched_at.strftime('%Y-%m-%d %H:%M UTC')}")
 
+    # Split into regular vs Shorts
     regular_df = df[~df["is_short"]].sort_values("view_count", ascending=False).head(15)
     shorts_df = df[df["is_short"]].sort_values("view_count", ascending=False).head(15)
 
     tab1, tab2, tab3 = st.tabs(["🎬 Regular Videos", "📱 Shorts", "📊 Raw Table"])
 
     with tab1:
-        for _, row in regular_df.iterrows():
-            render_card(row, channel_info)
+        if regular_df.empty:
+            st.info("No regular videos found.")
+        else:
+            for _, row in regular_df.iterrows():
+                render_card(row, channel_info)
 
     with tab2:
-        for _, row in shorts_df.iterrows():
-            render_card(row, channel_info)
+        if shorts_df.empty:
+            st.info("No Shorts found.")
+        else:
+            for _, row in shorts_df.iterrows():
+                render_card(row, channel_info)
 
     with tab3:
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df.sort_values("view_count", ascending=False),
+                     use_container_width=True)
 
 
 if __name__ == "__main__":
