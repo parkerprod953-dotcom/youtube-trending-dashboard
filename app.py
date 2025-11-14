@@ -183,7 +183,7 @@ def load_data(api_key: str):
 # -----------------------------
 
 def render_card(row, channel_info):
-    """Render a single video as a modern card using Streamlit layout only."""
+    """Render a single video as a modern card."""
     cid = row.get("channel_id")
     info = channel_info.get(cid, {}) if cid else {}
     logo_url = info.get("logo")
@@ -199,10 +199,10 @@ def render_card(row, channel_info):
 
     # Metrics
     views = int(row.get("view_count", 0))
-    views_text = f"👁️ {format_views(views)}"
+    views_text = f"{format_views(views)} views"
     duration = int(row.get("duration_sec", 0))
-    duration_text = f"⏱️ {duration // 60}:{duration % 60:02d}" if duration > 0 else "⏱️ live"
-    age_text = f"🕒 {format_time_ago(row.get('published_at', ''))}"
+    duration_text = f"{duration // 60}:{duration % 60:02d}" if duration > 0 else "live"
+    age_text = format_time_ago(row.get("published_at", ""))
 
     # Hot badge
     badge = ""
@@ -212,41 +212,57 @@ def render_card(row, channel_info):
         badge = "⭐"
 
     title = row.get("title") or "Untitled"
-    url = row.get("url")
+    url = row.get("url") or "#"
+    channel_title = row.get("channel_title") or "Unknown channel"
+
+    # Build card HTML (just for the right-hand side; thumbnail still uses st.image)
+    meta_line = f"👁 {views_text} · ⏱ {duration_text} · 🕒 {age_text}"
+    channel_line = f"{channel_title} · {origin}"
+
+    right_html = f"""
+<div style="display:flex;flex-direction:column;gap:4px;">
+  <div style="font-size:1.05rem;font-weight:600;">
+    <a href="{url}" target="_blank"
+       style="text-decoration:none;color:#101318;">
+       {title}
+    </a> {badge}
+  </div>
+  <div style="font-size:0.85rem;color:#6b7280;">
+    {meta_line}
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;font-size:0.9rem;color:#374151;margin-top:2px;">
+    {"<img src='" + logo_url + "' style='width:20px;height:20px;border-radius:50%;object-fit:cover;'/>" if logo_url else ""}
+    <span>{channel_line}</span>
+  </div>
+</div>
+"""
+
+    card_html_start = """
+<div style="
+    background-color:#ffffff;
+    border-radius:14px;
+    padding:14px 18px;
+    margin-bottom:14px;
+    box-shadow:0 2px 6px rgba(15,23,42,0.08);
+">
+"""
+    card_html_end = "</div>"
 
     with st.container():
-        # Outer layout
-        left, right = st.columns([1.4, 3])
+        st.markdown(card_html_start, unsafe_allow_html=True)
+        cols = st.columns([1.5, 3])
 
-        with left:
+        with cols[0]:
             if row.get("thumbnail_url"):
-                st.image(row.get("thumbnail_url"), use_column_width=True)
+                st.image(
+                    row.get("thumbnail_url"),
+                    use_column_width=True,
+                )
 
-        with right:
-            # Title row
-            if url:
-                st.markdown(f"#### [{title}]({url}) {badge}")
-            else:
-                st.markdown(f"#### {title} {badge}")
+        with cols[1]:
+            st.markdown(right_html, unsafe_allow_html=True)
 
-            # Metrics row
-            metric_cols = st.columns([1, 1, 1])
-            with metric_cols[0]:
-                st.caption(views_text)
-            with metric_cols[1]:
-                st.caption(duration_text)
-            with metric_cols[2]:
-                st.caption(age_text)
-
-            # Channel row
-            ch_cols = st.columns([0.15, 0.85])
-            with ch_cols[0]:
-                if logo_url:
-                    st.image(logo_url, width=28)
-            with ch_cols[1]:
-                st.markdown(f"**{row.get('channel_title')}**  ·  {origin}")
-
-    st.divider()
+        st.markdown(card_html_end, unsafe_allow_html=True)
 
 
 # -----------------------------
@@ -255,6 +271,23 @@ def render_card(row, channel_info):
 
 def main():
     st.set_page_config(page_title="CA YouTube News Dashboard", layout="wide")
+
+    # Global style: sleek system font & lighter background
+    st.markdown(
+        """
+<style>
+    html, body, [class*="css"]  {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background-color:#f3f4f6;
+    }
+    /* tighten default padding a bit */
+    section.main > div {
+        padding-top: 1rem;
+    }
+</style>
+""",
+        unsafe_allow_html=True,
+    )
 
     st.title("🇨🇦 YouTube News & Politics – Trending Dashboard")
 
