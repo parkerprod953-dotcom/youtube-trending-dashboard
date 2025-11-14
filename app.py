@@ -125,7 +125,7 @@ def fetch_trending(api_key: str):
             "channel_id": snippet.get("channelId"),
             "published_at": snippet.get("publishedAt"),
             "url": f"https://www.youtube.com/watch?v={item['id']}",
-            "view_count": int(stats.get("viewCount", 0)),
+            "view_count": int(stats.get("ViewCount", stats.get("viewCount", 0))),  # fallback safety
             "thumbnail_url": thumb_url,
             "duration_sec": duration_sec,
             "is_short": is_short,
@@ -317,12 +317,12 @@ def render_card(row, channel_info, rank: int):
 def main():
     st.set_page_config(page_title="CA YouTube News Dashboard", layout="wide")
 
-    # Global style: sleek system font & lighter background
+    # Global style: Futura-first font & lighter background
     st.markdown(
         """
 <style>
     html, body, [class*="css"]  {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family: Futura, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background-color:#f3f4f6;
     }
     section.main > div {
@@ -333,7 +333,35 @@ def main():
         unsafe_allow_html=True,
     )
 
-    st.title("🇨🇦 YouTube News & Politics – Trending Dashboard")
+    # Faded full-width banner header
+    st.markdown(
+        """
+<div style="position:relative; margin-bottom:0.9rem; border-radius:16px; overflow:hidden;">
+  <div style="
+      background-image:url('https://www.google.com/url?sa=i&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dq8eP2mpS7Dw&psig=AOvVaw2JQU4B4OyMUlpznsR1t_Ik&ust=1763168565741000&source=images&cd=vfe&opi=89978449&ved=0CBUQjRxqFwoTCJCb6Pi48JADFQAAAAAdAAAAABAp');
+      background-size:cover;
+      background-position:center;
+      filter:blur(1px) brightness(0.45);
+      height:150px;
+      transform:scale(1.05);
+  "></div>
+  <div style="
+      position:absolute; inset:0;
+      display:flex; flex-direction:column;
+      justify-content:center;
+      padding:0 24px;
+  ">
+    <div style="font-size:0.75rem; letter-spacing:0.16em; text-transform:uppercase; color:#e5e7eb;">
+      Dashboard
+    </div>
+    <div style="font-size:1.9rem; font-weight:650; color:#f9fafb; text-shadow:0 6px 18px rgba(0,0,0,0.55);">
+      YouTube News & Politics – Trending Dashboard
+    </div>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
     # ---------- PASSWORD GATE ----------
     expected_pwd = st.secrets.get("DASHBOARD_PASSWORD")
@@ -362,7 +390,7 @@ def main():
     with refresh_col:
         if st.button("🔄 Refresh data now"):
             load_data.clear()
-            st.experimental_rerun()
+            st.rerun()
 
     # Load cached data
     df, channel_info, fetched_at = load_data(api_key)
@@ -373,7 +401,7 @@ def main():
 
     st.markdown(
         f"""
-<div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:0.25rem;margin-bottom:0.5rem;">
+<div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:0.1rem;margin-bottom:0.4rem;">
   <div style="font-size:1.0rem;font-weight:600;color:#111827;">
     📡 Data last fetched:
     <span style="font-weight:700;">
@@ -391,15 +419,17 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # Legend + API limitation explanation
+    # Legend + API limitation explanation, clarified
     st.markdown(
         """
 <div style="font-size:0.9rem;color:#4b5563;margin-bottom:0.4rem;">
   <strong>Legend:</strong>
   🔥 ≥ 1M views &nbsp;&nbsp;·&nbsp;&nbsp; ⭐ ≥ 200K views<br>
-  <em>Note:</em> View counts shown here are global. The YouTube Data API
-  does <strong>not</strong> expose per-country viewership (e.g. Canadian vs global views).
-  The outlet filters below are based on the channel's registered country, not where views come from.
+  <strong>Note:</strong> These videos are the <em>Trending in Canada</em> results from YouTube
+  (<code>regionCode=CA</code>, category: News & Politics). View counts shown here are
+  <strong>global totals</strong> — the YouTube Data API does not provide per-country viewership
+  (for example, Canadian-only views). The outlet filters below are based on the
+  channel’s registered country, not where the views originated.
 </div>
 """,
         unsafe_allow_html=True,
