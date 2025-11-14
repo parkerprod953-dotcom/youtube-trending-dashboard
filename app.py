@@ -189,35 +189,40 @@ def render_card(row, channel_info):
 
     age = format_time_ago(row["published_at"])
 
-    logo_html = f'<img src="{logo}" style="width:20px;height:20px;border-radius:50%;margin-right:6px;">' if logo else ""
+    logo_html = (
+        f'<img src="{logo}" '
+        f'style="width:20px;height:20px;border-radius:50%;margin-right:6px;">'
+        if logo
+        else ""
+    )
 
-    st.markdown(
-        f"""
-<div style="display:flex; gap:12px; padding:12px; border:1px solid #eee; border-radius:10px; background:#fafafa;">
-  <div style="flex:0 0 180px;">
-    <a href="{row['url']}" target="_blank">
-      <img src="{row['thumbnail_url']}" style="width:100%; border-radius:8px;">
-    </a>
+    html = f"""
+<div style="display:flex;gap:12px;padding:12px;border:1px solid #eee;
+            border-radius:10px;background:#fafafa;">
+<div style="flex:0 0 180px;">
+  <a href="{row['url']}" target="_blank">
+    <img src="{row['thumbnail_url']}" style="width:100%;border-radius:8px;">
+  </a>
+</div>
+<div style="flex:1;">
+  <div style="font-size:16px;font-weight:600;">
+    <a href="{row['url']}" target="_blank"
+       style="color:#111;text-decoration:none;">
+      {row['title']}
+    </a> {badge}
   </div>
-
-  <div style="flex:1;">
-    <div style="font-size:16px; font-weight:600;">
-      <a href="{row['url']}" target="_blank" style="color:#111; text-decoration:none;">
-        {row['title']}
-      </a> {badge}
-    </div>
-
-    <div style="font-size:13px; color:#444; margin:4px 0;">
-      {views_str} views · {duration_str} · {age}
-    </div>
-
-    <div style="font-size:13px; color:#444;">
-      {logo_html}{row['channel_title']} · {origin}
-    </div>
+  <div style="font-size:13px;color:#444;margin:4px 0;">
+    {views_str} views · {duration_str} · {age}
+  </div>
+  <div style="font-size:13px;color:#444;">
+    {logo_html}{row['channel_title']} · {origin}
   </div>
 </div>
-""",
-        unsafe_allow_html=True,
+</div>
+"""
+
+    st.markdown(html, unsafe_allow_html=True)
+
     )
 
 
