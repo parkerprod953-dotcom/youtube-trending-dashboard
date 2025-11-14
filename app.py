@@ -82,13 +82,14 @@ def humanize_timedelta(td) -> str:
     return f"{weeks} week ago" if weeks == 1 else f"{weeks} weeks ago"
 
 
-def description_snippet(text: str, max_chars: int = 260) -> str:
+def description_snippet_words(text: str, max_words: int = 200) -> str:
+    """Trim description to N words for preview."""
     if not text:
         return ""
-    text = " ".join(text.strip().split())
-    if len(text) <= max_chars:
-        return text
-    return text[: max_chars - 1].rsplit(" ", 1)[0] + "…"
+    words = text.strip().split()
+    if len(words) <= max_words:
+        return " ".join(words)
+    return " ".join(words[:max_words]) + "…"
 
 
 # ---------------------------------------------------------------------
@@ -204,8 +205,14 @@ def fetch_channel_info(api_key: str, channel_ids):
             cid = item.get("id")
             snip = item.get("snippet", {})
             country = snip.get("country")
-            logo = (snip.get("thumbnails", {}).get("default") or {}).get("url")
-            info[cid] = {"country": country, "logo": logo}
+            logos = snip.get("thumbnails", {}) or {}
+            logo_url = (
+                logos.get("default", {}).get("url")
+                or logos.get("medium", {}).get("url")
+                or logos.get("high", {}).get("url")
+                or ""
+            )
+            info[cid] = {"country": country, "logo": logo_url}
 
     return info
 
@@ -237,7 +244,10 @@ def load_data():
     df["views_str"] = df["view_count"].apply(format_views)
     df["duration_str"] = df["duration_sec"].apply(format_duration)
 
-    df["description_snippet"] = df["description"].apply(description_snippet)
+    # Description preview (200-word snippet)
+    df["description_snippet"] = df["description"].apply(
+        lambda t: description_snippet_words(t, max_words=200)
+    )
 
     # Channel metadata
     df["channel_country"] = df["channel_id"].map(
@@ -276,6 +286,29 @@ def filter_by_outlet(df, outlet_filter: str):
 # ---------------------------------------------------------------------
 
 
+def inject_base_css():
+    """Force light look & style cards."""
+    st.markdown(
+        f"""
+<style>
+:root {{
+  color-scheme: light;
+}}
+html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"], [data-testid="stHeader"] {{
+  background-color: #f9fafb !important;
+  color: #0f172a !important;
+}}
+
+a {{
+  color: #0f6ddf;
+}}
+
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
 def badges_for_row(row, rank=None):
     badges = []
     if rank is not None and rank <= 3:
@@ -286,22 +319,29 @@ def badges_for_row(row, rank=None):
 
 
 def render_video_list(df, label_metric=None, label_metric_title=None):
-    """Render list of videos as sleek cards."""
+    """Render list of videos as sleek cards with clickable thumbnails + expand description."""
     if df.empty:
         st.info("No videos to show for this filter.")
         return
 
     for idx, row in df.reset_index(drop=True).iterrows():
         rank = idx + 1
+        url = row["url"]
 
         cols = st.columns([1.1, 3])
 
         with cols[0]:
-            st.image(
-                row["thumbnail_url"],
-                use_column_width=True,
-                caption=None,
-            )
+            if row["thumbnail_url"]:
+                # Clickable thumbnail
+                st.markdown(
+                    f"""
+<a href="{url}" target="_blank">
+  <img src="{row['thumbnail_url']}"
+       style="width:100%;max-width:240px;border-radius:10px;object-fit:cover;" />
+</a>
+""",
+                    unsafe_allow_html=True,
+                )
 
         with cols[1]:
             badges = badges_for_row(row, rank)
@@ -341,13 +381,19 @@ def render_video_list(df, label_metric=None, label_metric_title=None):
                     unsafe_allow_html=True,
                 )
 
-            if row.get("description_snippet"):
+            # Description snippet + expander for full description
+            full_desc = row.get("description") or ""
+            snippet = row.get("description_snippet") or ""
+            if snippet:
                 st.markdown(
-                    f"<div style='font-size:0.9rem; color:#111827; margin-bottom:0.35rem;'>"
-                    f"{row['description_snippet']}"
+                    f"<div style='font-size:0.9rem; color:#111827; margin-bottom:0.2rem;'>"
+                    f"{snippet}"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
+                if full_desc.strip() and len(full_desc.split()) > len(snippet.split()):
+                    with st.expander("Read full description"):
+                        st.write(full_desc)
 
             # Copy details helper
             copy_text = (
@@ -356,7 +402,7 @@ def render_video_list(df, label_metric=None, label_metric_title=None):
                 f"Views: {row['views_str']}\n"
                 f"Duration: {row['duration_str']}\n"
                 f"Link: {row['url']}\n\n"
-                f"Description:\n{row['description'] or ''}"
+                f"Description:\n{full_desc}"
             )
             with st.expander("Copy title + details"):
                 st.code(copy_text, language="text")
@@ -373,6 +419,8 @@ def main():
         layout="wide",
         page_icon="📺",
     )
+
+    inject_base_css()
 
     # Top bar: refresh + note
     top_l, top_r = st.columns([1, 4])
@@ -474,7 +522,7 @@ def main():
         st.warning("No trending News & Politics videos found right now.")
         return
 
-    # Apply outlet filter on demand in each section
+    # Base splits
     df_regular_base = df[df["is_regular"]]
     df_shorts_base = df[df["is_short"]]
 
