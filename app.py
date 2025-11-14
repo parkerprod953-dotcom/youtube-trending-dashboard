@@ -190,7 +190,7 @@ def load_data(api_key: str):
 # -----------------------------
 
 def filter_by_origin(df: pd.DataFrame, channel_info: dict, mode: str) -> pd.DataFrame:
-    """Filter dataframe by outlet origin mode."""
+    """Filter dataframe by outlet origin mode, based on channel country."""
     if mode == "All outlets" or df.empty:
         return df
 
@@ -206,8 +206,8 @@ def filter_by_origin(df: pd.DataFrame, channel_info: dict, mode: str) -> pd.Data
     return df[mask]
 
 
-def render_card(row, channel_info):
-    """Render a single video as a modern, compact card."""
+def render_card(row, channel_info, rank: int):
+    """Render a single ranked video as a modern, compact card."""
     cid = row.get("channel_id")
     info = channel_info.get(cid, {}) if cid else {}
     logo_url = info.get("logo")
@@ -247,6 +247,7 @@ def render_card(row, channel_info):
     right_html = f"""
 <div style="display:flex;flex-direction:column;gap:6px;">
   <div style="font-size:1.15rem;font-weight:650;line-height:1.25;">
+    <span style="color:#9ca3af;font-size:0.95rem;margin-right:6px;">#{rank}</span>
     <a href="{url}" target="_blank"
        style="text-decoration:none;color:#111827;">
        {title}
@@ -277,22 +278,36 @@ def render_card(row, channel_info):
 """
     card_html_end = "</div>"
 
+    title_for_copy = title.replace("\n", " ").strip()
+    desc_for_copy = description.strip()
+    copy_text = (
+        f"Title: {title_for_copy}\n"
+        f"Channel: {channel_title}\n"
+        f"Views: {views} (approx {format_views(views)})\n"
+        f"URL: {url}\n\n"
+        f"Description:\n{desc_for_copy}"
+    )
+
     with st.container():
         st.markdown(card_html_start, unsafe_allow_html=True)
-        # Smaller thumbnail column -> list feel
+
         cols = st.columns([0.9, 3.1])
 
         with cols[0]:
             if row.get("thumbnail_url"):
                 st.image(
                     row.get("thumbnail_url"),
-                    width=220,   # compact thumbnail
+                    width=220,  # compact thumbnail
                 )
 
         with cols[1]:
             st.markdown(right_html, unsafe_allow_html=True)
 
         st.markdown(card_html_end, unsafe_allow_html=True)
+
+        # Copy helper
+        with st.expander("📋 Copy title / description / views / channel"):
+            st.code(copy_text, language="text")
 
 
 # -----------------------------
@@ -358,7 +373,7 @@ def main():
 
     st.markdown(
         f"""
-<div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:0.25rem;margin-bottom:0.75rem;">
+<div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:0.25rem;margin-bottom:0.5rem;">
   <div style="font-size:1.0rem;font-weight:600;color:#111827;">
     📡 Data last fetched:
     <span style="font-weight:700;">
@@ -376,9 +391,23 @@ def main():
         unsafe_allow_html=True,
     )
 
+    # Legend + API limitation explanation
+    st.markdown(
+        """
+<div style="font-size:0.9rem;color:#4b5563;margin-bottom:0.4rem;">
+  <strong>Legend:</strong>
+  🔥 ≥ 1M views &nbsp;&nbsp;·&nbsp;&nbsp; ⭐ ≥ 200K views<br>
+  <em>Note:</em> View counts shown here are global. The YouTube Data API
+  does <strong>not</strong> expose per-country viewership (e.g. Canadian vs global views).
+  The outlet filters below are based on the channel's registered country, not where views come from.
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
     # Outlet filter toggle
     origin_mode = st.radio(
-        "Outlets to include:",
+        "Channel origin filter:",
         ["All outlets", "Canadian outlets only", "Global outlets (non-CA)"],
         horizontal=True,
     )
@@ -412,44 +441,45 @@ def main():
     with tab_recent:
         st.subheader("Top uploads from the last 24 hours")
         st.caption(
-            "Top News & Politics videos trending in Canada that were **uploaded in the last 24 hours**, "
-            "sorted by current view count."
+            "Top News & Politics videos **trending in Canada** that were uploaded in the last 24 hours, "
+            "sorted by global view count. Filtered by the channel-origin selector above."
         )
         if recent_df.empty:
             st.info("No News & Politics uploads in the last 24 hours that match this outlet filter.")
         else:
-            for _, row in recent_df.iterrows():
-                render_card(row, channel_info)
+            for rank, (_, row) in enumerate(recent_df.iterrows(), start=1):
+                render_card(row, channel_info, rank)
 
     with tab1:
         st.subheader("Top trending regular videos")
         st.caption(
-            "Non-Shorts News & Politics videos **currently trending on YouTube in Canada** "
-            "under the News & Politics category, sorted by current view count."
+            "Non-Shorts News & Politics videos **currently trending on YouTube in Canada**, "
+            "sorted by global view count. Filtered by the channel-origin selector above."
         )
         if regular_df.empty:
             st.info("No regular videos found for this outlet filter.")
         else:
-            for _, row in regular_df.iterrows():
-                render_card(row, channel_info)
+            for rank, (_, row) in enumerate(regular_df.iterrows(), start=1):
+                render_card(row, channel_info, rank)
 
     with tab2:
         st.subheader("Top trending Shorts")
         st.caption(
             "YouTube Shorts (vertical or ≤ 75 seconds / tagged #shorts) **trending in Canada** "
-            "in the News & Politics category, sorted by current view count."
+            "under the News & Politics category, sorted by global view count. "
+            "Filtered by the channel-origin selector above."
         )
         if shorts_df.empty:
             st.info("No Shorts found for this outlet filter.")
         else:
-            for _, row in shorts_df.iterrows():
-                render_card(row, channel_info)
+            for rank, (_, row) in enumerate(shorts_df.iterrows(), start=1):
+                render_card(row, channel_info, rank)
 
     with tab3:
         st.subheader("Raw dataset")
         st.caption(
             "Full set of News & Politics videos returned from the YouTube Trending API call "
-            "(region: Canada, category: News & Politics)."
+            "(region: Canada, category: News & Politics). View counts are global."
         )
         st.dataframe(
             df.sort_values("view_count", ascending=False),
