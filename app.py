@@ -352,6 +352,11 @@ def render_video_list(df: pd.DataFrame, section_key: str):
         st.write("No videos found for this section right now.")
         return
 
+    # Per-section copy buffer
+    state_key = f"copied_details_{section_key}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = ""
+
     for idx, row in df.reset_index(drop=True).iterrows():
         rank = idx + 1
         title = row["title"]
@@ -422,17 +427,21 @@ def render_video_list(df: pd.DataFrame, section_key: str):
             "Copy title + details",
             key=f"copy_{section_key}_{row['video_id']}",
         ):
-            st.session_state["copied_details"] = copy_text
+            st.session_state[state_key] = copy_text
         st.write("")  # small gap
 
-    if st.session_state.get("copied_details"):
-        st.markdown("**Copy buffer** (select & copy):")
-        st.text_area(
-            "",
-            st.session_state["copied_details"],
-            height=160,
-            key="copy_buffer_area",
-        )
+    # Section-level copy buffer in an expander
+    buffer = st.session_state[state_key]
+    if buffer:
+        with st.expander(
+            "📋 Copy buffer – click to view / copy", expanded=False
+        ):
+            st.text_area(
+                "Copy & paste these details:",
+                buffer,
+                height=180,
+                key=f"copy_buffer_area_{section_key}",
+            )
 
 
 # -----------------------------
@@ -446,16 +455,12 @@ def main():
         layout="wide",
     )
 
-    if "copied_details" not in st.session_state:
-        st.session_state["copied_details"] = ""
-
     render_css()
 
     # Refresh button at very top
     top_cols = st.columns([1, 3])
     with top_cols[0]:
         if st.button("🔄 Refresh data now"):
-            # cache will be re-evaluated next call
             st.cache_data.clear()
             st.rerun()
     with top_cols[1]:
