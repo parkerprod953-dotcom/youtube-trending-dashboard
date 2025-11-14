@@ -1,2 +1,10 @@
 [theme]
 base="dark"
+
+primaryColor="#FF4B4B"            # Accent (buttons, radio, etc.)
+backgroundColor="#050711"         # Main app background
+secondaryBackgroundColor="#111522" # Cards / containers
+textColor="#FFFFFF"
+
+[server]
+headless = true
