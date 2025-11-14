@@ -234,11 +234,20 @@ def render_css():
     st.markdown(
         """
 <style>
-/* ====== GLOBAL APP LOOK ====== */
+/* ====== GLOBAL / RESET ====== */
+html, body {
+  background-color: #02030a !important;
+}
 .stApp {
   background: radial-gradient(circle at top, #202642 0, #050711 45%, #02030a 100%) !important;
   color: #ffffff;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
+}
+header[data-testid="stHeader"] {
+  background: transparent !important;
+}
+div[data-testid="stDecoration"] {
+  background: transparent !important;
 }
 
 /* Main content width tweak */
@@ -250,20 +259,27 @@ def render_css():
 
 /* ====== TABS ====== */
 .stTabs [data-baseweb="tab-list"] {
-  gap: 0.25rem;
+  gap: 0.35rem;
+  border-bottom: none !important;
 }
 .stTabs [data-baseweb="tab"] {
   background-color: #080b16;
   border-radius: 999px;
-  padding: 0.4rem 0.9rem;
-  font-size: 0.85rem;
-  color: #b6bfdd;
+  padding: 0.45rem 1.0rem;
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: #c4cff5;
   border: 1px solid transparent;
+  text-transform: none;
 }
 .stTabs [data-baseweb="tab"][aria-selected="true"] {
   background: linear-gradient(135deg, #ff4b4b, #ff9f43);
   color: #ffffff;
-  border-color: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.16);
+}
+.stTabs [data-baseweb="tab-highlight"] {
+  background: transparent !important;
+  border-bottom: none !important;
 }
 
 /* ====== BUTTONS ====== */
@@ -283,13 +299,17 @@ def render_css():
   box-shadow: 0 12px 28px rgba(0,0,0,0.65);
 }
 
-/* ====== SELECTS, RADIO, TEXT INPUTS ====== */
-.stSelectbox div[data-baseweb="select"],
-.stRadio > label,
-.stTextInput > div > div input {
+/* ====== RADIO / OUTLET FILTER ====== */
+.stRadio > label {
+  color: #f0f3ff !important;
+  font-weight: 650;
+}
+.stRadio div[role="radiogroup"] label {
+  color: #dde4ff !important;
   font-size: 0.9rem;
 }
 
+/* ====== TEXT INPUTS ====== */
 .stTextInput > div > div input {
   background-color: #111522 !important;
   border-radius: 8px !important;
@@ -409,7 +429,7 @@ def render_banner(fetched_at_utc: datetime):
       <br><br>
       The <span style="color:#ffb347;">🔥 Hot (last 8 hours)</span> section looks only at
       videos uploaded in the last 8 hours and ranks them by <b>views per hour since upload</b>
-      (current views ÷ hours online) as a proxy for fastest-rising stories.
+      (current view count ÷ hours online) as a proxy for fastest-rising stories.
     </div>
     <div style="margin-top:18px;font-size:13px;color:#e9eefc;">
       <span style="padding:6px 12px;border-radius:999px;background:rgba(0,0,0,0.45);">
