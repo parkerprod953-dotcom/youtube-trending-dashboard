@@ -207,11 +207,11 @@ def render_card(row, channel_info):
     else:
         logo_html = ""
 
-    # FINAL CARD HTML (VALID & SAFE)
+    # FINAL CARD HTML
     html = f"""
 <div style="display:flex;gap:12px;padding:12px;border:1px solid #eee;
             border-radius:10px;background:#fafafa;margin-bottom:12px;">
-  
+
   <div style="flex:0 0 180px;">
     <a href="{row['url']}" target="_blank">
       <img src="{row['thumbnail_url']}" style="width:100%;border-radius:8px;">
@@ -239,8 +239,6 @@ def render_card(row, channel_info):
 """
 
     st.markdown(html, unsafe_allow_html=True)
-
-    )
 
 
 # -----------------------------
