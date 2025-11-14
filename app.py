@@ -1,62 +1,53 @@
 import streamlit as st
 import requests
-import pandas as pd
-from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
+import pytz
+import re
 
 # -----------------------------
-# Utility Functions
+# CONFIG / CONSTANTS
 # -----------------------------
+
+API_KEY = st.secrets["YOUTUBE_API_KEY"]      # set in Streamlit secrets
+YOUTUBE_BASE = "https://www.googleapis.com/youtube/v3"
+REGION_CODE = "CA"
+NEWS_CATEGORY_ID = "25"                      # News & Politics
+BANNER_URL = (
+    "https://github.com/parkerprod953-dotcom/"
+    "youtube-trending-dashboard/raw/"
+    "fb65a040fe112f308c30f24e7693af1fade31d1f/assets/banner.jpg"
+)
+
+TZ_ET = pytz.timezone("US/Eastern")
+
+# -----------------------------
+# UTILS
+# -----------------------------
+
 
 def parse_iso8601_duration(duration: str) -> int:
-    """Convert ISO 8601 duration (PT#H#M#S) into seconds."""
+    """Convert ISO 8601 duration (e.g. PT1H2M10S) to seconds."""
     if not duration or not duration.startswith("PT"):
         return 0
-    duration = duration[2:]
-    total = 0
-    num = ""
-    for ch in duration:
-        if ch.isdigit():
-            num += ch
-        else:
-            if not num:
-                continue
-            value = int(num)
-            if ch == "H":
-                total += value * 3600
-            elif ch == "M":
-                total += value * 60
-            elif ch == "S":
-                total += value
-            num = ""
-    return total
+    pattern = r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?"
+    m = re.match(pattern, duration)
+    if not m:
+        return 0
+    hours = int(m.group(1) or 0)
+    minutes = int(m.group(2) or 0)
+    seconds = int(m.group(3) or 0)
+    return hours * 3600 + minutes * 60 + seconds
 
 
-def format_time_ago(iso_time: str) -> str:
-    """Return human-friendly time difference (e.g., '3 hours ago')."""
-    try:
-        dt = datetime.fromisoformat(iso_time.replace("Z", "+00:00"))
-    except Exception:
-        return "unknown"
-    now = datetime.now(timezone.utc)
-    diff = now - dt
-    secs = diff.total_seconds()
-
-    if secs < 60:
-        return "just now"
-    mins = secs / 60
-    if mins < 60:
-        return f"{int(mins)} min ago"
-    hrs = mins / 60
-    if hrs < 24:
-        return f"{int(hrs)} hours ago"
-    days = hrs / 24
-    if days < 7:
-        return f"{int(days)} days ago"
-    weeks = days / 7
-    if weeks < 4:
-        return f"{int(weeks)} weeks ago"
-    return f"{int(days/30)} months ago"
+def format_duration(seconds: int) -> str:
+    if seconds >= 3600:
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        return f"{h:d}:{m:02d}:{s:02d}"
+    m = seconds // 60
+    s = seconds % 60
+    return f"{m:d}:{s:02d}"
 
 
 def format_views(n: int) -> str:
@@ -67,454 +58,579 @@ def format_views(n: int) -> str:
     return str(n)
 
 
+def parse_published_at(ts: str) -> datetime:
+    # YouTube timestamps are like "2025-11-13T20:42:01Z"
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+
+def format_age(published_at: datetime, now: datetime) -> str:
+    delta = now - published_at
+    if delta < timedelta(minutes=1):
+        return "just now"
+    if delta < timedelta(hours=1):
+        minutes = int(delta.total_seconds() // 60)
+        return f"{minutes} min ago"
+    if delta < timedelta(days=1):
+        hours = int(delta.total_seconds() // 3600)
+        return f"{hours} hours ago"
+    days = delta.days
+    if days == 1:
+        return "1 day ago"
+    return f"{days} days ago"
+
+
+def origin_label(country_code: str | None) -> str:
+    if country_code == "CA":
+        return "Canadian outlet"
+    if country_code == "US":
+        return "US outlet"
+    if not country_code:
+        return "Global outlet"
+    return f"{country_code} outlet"
+
+
 # -----------------------------
-# API Fetching
+# DATA FETCH
 # -----------------------------
 
-def fetch_trending(api_key: str):
-    """Fetch trending News & Politics videos in Canada."""
-    url = "https://www.googleapis.com/youtube/v3/videos"
+
+def fetch_trending_videos(max_results: int = 40) -> list[dict]:
+    """Fetch trending News & Politics in Canada."""
     params = {
         "part": "snippet,contentDetails,statistics",
         "chart": "mostPopular",
-        "regionCode": "CA",
-        "videoCategoryId": "25",  # News & Politics
-        "maxResults": 50,
-        "key": api_key,
+        "regionCode": REGION_CODE,
+        "videoCategoryId": NEWS_CATEGORY_ID,
+        "maxResults": max_results,
+        "key": API_KEY,
     }
-    r = requests.get(url, params=params)
-    r.raise_for_status()
-    data = r.json()
+    resp = requests.get(f"{YOUTUBE_BASE}/videos", params=params, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
 
-    videos = []
-    channel_ids = set()
-
+    videos: list[dict] = []
     for item in data.get("items", []):
-        snippet = item["snippet"]
-        stats = item["statistics"]
-        details = item["contentDetails"]
+        snippet = item.get("snippet", {})
+        stats = item.get("statistics", {})
+        details = item.get("contentDetails", {})
+        thumbs = (snippet.get("thumbnails") or {})
 
-        # Thumbnail selection
-        thumbs = snippet.get("thumbnails", {})
-        t = thumbs.get("high") or thumbs.get("medium") or thumbs.get("default") or {}
-        thumb_url = t.get("url")
-        thumb_w = t.get("width", 0)
-        thumb_h = t.get("height", 0)
+        # Choose best thumbnail
+        t_obj = (
+            thumbs.get("maxres")
+            or thumbs.get("standard")
+            or thumbs.get("high")
+            or thumbs.get("medium")
+            or thumbs.get("default")
+            or {}
+        )
+        thumb_url = t_obj.get("url")
+        thumb_w = t_obj.get("width") or 0
+        thumb_h = t_obj.get("height") or 0
 
-        # Vertical detection
+        # Vertical detection from thumbnail aspect ratio
         is_vertical = False
         if thumb_w and thumb_h:
             aspect = thumb_w / thumb_h
+            # < 0.9 means taller than wide
             is_vertical = aspect < 0.9
 
         # Duration
-        duration_sec = parse_iso8601_duration(details.get("duration", "PT0S"))
+        duration_secs = parse_iso8601_duration(details.get("duration", ""))
 
-        # Shorts keyword detection
-        text = (snippet.get("title", "") + " " + snippet.get("description", "")).lower()
-        marked_short = "#shorts" in text or ("#short" in text.replace("#shorts", ""))
+        # Shorts detection
+        text = (snippet.get("title", "") + " " +
+                snippet.get("description", "")).lower()
+        tagged_short = (
+            "#shorts" in text
+            or "#short " in text
+            or " #short" in text
+        )
+        is_short = tagged_short or duration_secs <= 75 or is_vertical
 
-        # Final Shorts logic
-        is_short = (duration_sec <= 75) or marked_short or is_vertical
+        video_id = item.get("id")
+        if not video_id:
+            continue
 
-        video = {
-            "video_id": item["id"],
-            "title": snippet.get("title"),
-            "description": snippet.get("description"),
-            "channel_title": snippet.get("channelTitle"),
-            "channel_id": snippet.get("channelId"),
-            "published_at": snippet.get("publishedAt"),
-            "url": f"https://www.youtube.com/watch?v={item['id']}",
-            "view_count": int(stats.get("ViewCount", stats.get("viewCount", 0))),  # fallback safety
-            "thumbnail_url": thumb_url,
-            "duration_sec": duration_sec,
-            "is_short": is_short,
-            "is_vertical": is_vertical,
-        }
-        videos.append(video)
+        try:
+            view_count = int(stats.get("viewCount", 0))
+        except (TypeError, ValueError):
+            view_count = 0
 
-        if snippet.get("channelId"):
-            channel_ids.add(snippet["channelId"])
+        published_at = parse_published_at(snippet.get("publishedAt", ""))
 
-    return videos, channel_ids
+        videos.append(
+            {
+                "video_id": video_id,
+                "title": snippet.get("title", ""),
+                "description": snippet.get("description", "") or "",
+                "channel_title": snippet.get("channelTitle", "") or "",
+                "channel_id": snippet.get("channelId", ""),
+                "published_at": published_at,
+                "view_count": view_count,
+                "duration_sec": duration_secs,
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+                "thumbnail_url": thumb_url,
+                "is_short": is_short,
+                "is_vertical": is_vertical,
+            }
+        )
+
+    return videos
 
 
-def fetch_channel_info(api_key: str, channel_ids: set):
-    """Fetch channel logo + country for each channel ID."""
+def fetch_channel_info(channel_ids: list[str]) -> dict:
+    """Fetch channel country + logo thumbnail."""
     if not channel_ids:
         return {}
+    unique_ids = list({cid for cid in channel_ids if cid})
 
-    url = "https://www.googleapis.com/youtube/v3/channels"
-    params = {
-        "part": "snippet",
-        "id": ",".join(channel_ids),
-        "key": api_key,
-    }
-    r = requests.get(url, params=params)
-    r.raise_for_status()
-    data = r.json()
-
-    info = {}
-    for ch in data.get("items", []):
-        cid = ch["id"]
-        snip = ch["snippet"]
-        thumbs = snip.get("thumbnails", {})
-        t = thumbs.get("default") or thumbs.get("medium") or thumbs.get("high") or {}
-
-        info[cid] = {
-            "logo": t.get("url"),
-            "country": snip.get("country"),
+    info: dict[str, dict] = {}
+    # API allows up to 50 ids per request
+    for i in range(0, len(unique_ids), 50):
+        chunk = unique_ids[i : i + 50]
+        params = {
+            "part": "snippet",
+            "id": ",".join(chunk),
+            "key": API_KEY,
+            "maxResults": 50,
         }
-
+        resp = requests.get(f"{YOUTUBE_BASE}/channels", params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        for item in data.get("items", []):
+            cid = item.get("id")
+            snip = item.get("snippet", {})
+            thumbs = (snip.get("thumbnails") or {})
+            logo_obj = (
+                thumbs.get("default")
+                or thumbs.get("medium")
+                or thumbs.get("high")
+                or {}
+            )
+            info[cid] = {
+                "country": snip.get("country"),
+                "logo_url": logo_obj.get("url"),
+            }
     return info
 
 
-@st.cache_data(ttl=60 * 60 * 4)
-def load_data(api_key: str):
-    """Load videos + channel info, cached for 4 hours."""
-    videos, channel_ids = fetch_trending(api_key)
-    channel_info = fetch_channel_info(api_key, channel_ids)
-    df = pd.DataFrame(videos)
-
-    # Parse published_at into a timezone-aware datetime (UTC)
-    df["published_dt"] = pd.to_datetime(
-        df["published_at"], utc=True, errors="coerce"
-    )
-
-    fetched_at = datetime.now(timezone.utc)
-    return df, channel_info, fetched_at
-
-
 # -----------------------------
-# UI Helpers
+# PRESENTATION HELPERS
 # -----------------------------
 
-def filter_by_origin(df: pd.DataFrame, channel_info: dict, mode: str) -> pd.DataFrame:
-    """Filter dataframe by outlet origin mode, based on channel country."""
-    if mode == "All outlets" or df.empty:
-        return df
 
-    mask = []
-    for _, row in df.iterrows():
-        cid = row.get("channel_id")
-        info = channel_info.get(cid, {}) if cid else {}
-        country = info.get("country")
-        if mode == "Canadian outlets only":
-            mask.append(country == "CA")
-        else:  # Global outlets (non-CA)
-            mask.append(country != "CA" or pd.isna(country))
-    return df[mask]
-
-
-def render_card(row, channel_info, rank: int):
-    """Render a single ranked video as a modern, compact card."""
-    cid = row.get("channel_id")
-    info = channel_info.get(cid, {}) if cid else {}
-    logo_url = info.get("logo")
-    country = info.get("country")
-
-    # Origin text
-    if country == "CA":
-        origin = "🇨🇦 Canadian outlet"
-    elif country:
-        origin = f"🌍 {country} outlet"
-    else:
-        origin = "🌍 outlet (country unknown)"
-
-    # Metrics
-    views = int(row.get("view_count", 0))
-    views_text = f"{format_views(views)} views"
-    duration = int(row.get("duration_sec", 0))
-    duration_text = f"{duration // 60}:{duration % 60:02d}" if duration > 0 else "live"
-    age_text = format_time_ago(row.get("published_at", ""))
-
-    # Hot badge
-    badge = ""
-    if views >= 1_000_000:
-        badge = "🔥"
-    elif views >= 200_000:
-        badge = "⭐"
-
-    title = row.get("title") or "Untitled"
-    url = row.get("url") or "#"
-    channel_title = row.get("channel_title") or "Unknown channel"
-    description = row.get("description") or ""
-    desc_short = (description[:220] + "…") if len(description) > 220 else description
-
-    meta_line = f"👁 {views_text} · ⏱ {duration_text} · 🕒 {age_text}"
-    channel_line = f"{channel_title} · {origin}"
-
-    right_html = f"""
-<div style="display:flex;flex-direction:column;gap:6px;">
-  <div style="font-size:1.15rem;font-weight:650;line-height:1.25;">
-    <span style="color:#9ca3af;font-size:0.95rem;margin-right:6px;">#{rank}</span>
-    <a href="{url}" target="_blank"
-       style="text-decoration:none;color:#111827;">
-       {title}
-    </a> {badge}
-  </div>
-  <div style="font-size:0.95rem;color:#4b5563;">
-    {meta_line}
-  </div>
-  <div style="font-size:0.95rem;color:#111827;margin-top:2px;">
-    {desc_short}
-  </div>
-  <div style="display:flex;align-items:center;gap:8px;
-              font-size:0.95rem;color:#374151;margin-top:2px;">
-    {"<img src='" + logo_url + "' style='width:22px;height:22px;border-radius:50%;object-fit:cover;'/>" if logo_url else ""}
-    <span>{channel_line}</span>
-  </div>
-</div>
-"""
-
-    card_html_start = """
-<div style="
-    background-color:#ffffff;
-    border-radius:12px;
-    padding:10px 14px;
-    margin-bottom:10px;
-    box-shadow:0 1px 4px rgba(15,23,42,0.06);
-">
-"""
-    card_html_end = "</div>"
-
-    title_for_copy = title.replace("\n", " ").strip()
-    desc_for_copy = description.strip()
-    copy_text = (
-        f"Title: {title_for_copy}\n"
-        f"Channel: {channel_title}\n"
-        f"Views: {views} (approx {format_views(views)})\n"
-        f"URL: {url}\n\n"
-        f"Description:\n{desc_for_copy}"
-    )
-
-    with st.container():
-        st.markdown(card_html_start, unsafe_allow_html=True)
-
-        cols = st.columns([0.9, 3.1])
-
-        with cols[0]:
-            if row.get("thumbnail_url"):
-                st.image(
-                    row.get("thumbnail_url"),
-                    width=220,  # compact thumbnail
-                )
-
-        with cols[1]:
-            st.markdown(right_html, unsafe_allow_html=True)
-
-        st.markdown(card_html_end, unsafe_allow_html=True)
-
-        # Copy helper
-        with st.expander("📋 Copy title / description / views / channel"):
-            st.code(copy_text, language="text")
-
-
-# -----------------------------
-# Main App
-# -----------------------------
-
-def main():
-    st.set_page_config(page_title="CA YouTube News Dashboard", layout="wide")
-
-    # Global style: Futura-first font & lighter background
-    st.markdown(
-        """
-<style>
-    html, body, [class*="css"]  {
-        font-family: Futura, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background-color:#f3f4f6;
-    }
-    section.main > div {
-        padding-top: 0.8rem;
-    }
-</style>
-""",
-        unsafe_allow_html=True,
-    )
-
-    # Faded full-width banner header
-    st.markdown(
-        """
-<div style="position:relative; margin-bottom:0.9rem; border-radius:16px; overflow:hidden;">
-  <div style="
-      background-image:url('https://www.google.com/url?sa=i&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dq8eP2mpS7Dw&psig=AOvVaw2JQU4B4OyMUlpznsR1t_Ik&ust=1763168565741000&source=images&cd=vfe&opi=89978449&ved=0CBUQjRxqFwoTCJCb6Pi48JADFQAAAAAdAAAAABAp');
-      background-size:cover;
-      background-position:center;
-      filter:blur(1px) brightness(0.45);
-      height:150px;
-      transform:scale(1.05);
-  "></div>
-  <div style="
-      position:absolute; inset:0;
-      display:flex; flex-direction:column;
-      justify-content:center;
-      padding:0 24px;
-  ">
-    <div style="font-size:0.75rem; letter-spacing:0.16em; text-transform:uppercase; color:#e5e7eb;">
-      Dashboard
-    </div>
-    <div style="font-size:1.9rem; font-weight:650; color:#f9fafb; text-shadow:0 6px 18px rgba(0,0,0,0.55);">
-      YouTube News & Politics – Trending Dashboard
-    </div>
-  </div>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
-
-    # ---------- PASSWORD GATE ----------
-    expected_pwd = st.secrets.get("DASHBOARD_PASSWORD")
-    if expected_pwd:  # Only show login if password is set
-        if "authed" not in st.session_state:
-            st.session_state.authed = False
-
-        if not st.session_state.authed:
-            pwd = st.text_input("Enter dashboard password", type="password")
-            if st.button("Submit"):
-                if pwd == expected_pwd:
-                    st.session_state.authed = True
-                    st.rerun()
-                else:
-                    st.error("Incorrect password.")
-            return
-    # -----------------------------------
-
-    api_key = st.secrets.get("YOUTUBE_API_KEY")
-    if not api_key:
-        st.error("Missing YOUTUBE_API_KEY in Streamlit Secrets.")
-        return
-
-    # Manual refresh button (clears cache + reruns)
-    refresh_col, _ = st.columns([0.25, 0.75])
-    with refresh_col:
-        if st.button("🔄 Refresh data now"):
-            load_data.clear()
-            st.rerun()
-
-    # Load cached data
-    df, channel_info, fetched_at = load_data(api_key)
-
-    # Time info
-    fetched_et = fetched_at.astimezone(ZoneInfo("America/Toronto"))
-    current_et = datetime.now(ZoneInfo("America/Toronto"))
+def header_and_styles(last_updated_et: datetime):
+    last_str = last_updated_et.strftime("%b %d, %Y · %I:%M %p ET")
 
     st.markdown(
         f"""
-<div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:0.1rem;margin-bottom:0.4rem;">
-  <div style="font-size:1.0rem;font-weight:600;color:#111827;">
-    📡 Data last fetched:
-    <span style="font-weight:700;">
-      {fetched_et.strftime('%Y-%m-%d %I:%M %p ET')}
-    </span>
-  </div>
-  <div style="font-size:0.95rem;color:#4b5563;">
-    ⏱ Current ET time:
-    <span style="font-variant-numeric:tabular-nums;">
-      {current_et.strftime('%Y-%m-%d %I:%M:%S %p ET')}
-    </span>
-  </div>
-</div>
-""",
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+
+        html, body, [class*="css"] {{
+            font-family: "Montserrat", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }}
+
+        .banner-wrapper {{
+            position: relative;
+            width: 100%;
+            height: 170px;
+            margin-bottom: 0.5rem;
+        }}
+        .banner-bg {{
+            position: absolute;
+            inset: 0;
+            background-image: url('{BANNER_URL}');
+            background-size: cover;
+            background-position: center;
+            filter: brightness(0.35) blur(2px);
+        }}
+        .banner-overlay {{
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to right, rgba(0,0,0,0.7), rgba(0,0,0,0.2));
+        }}
+        .banner-content {{
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            color: #ffffff;
+            padding: 0 1rem;
+        }}
+        .banner-title {{
+            font-size: 2.1rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+        }}
+        .banner-subtext {{
+            margin-top: 0.25rem;
+            font-size: 0.98rem;
+            opacity: 0.9;
+        }}
+        .last-updated-pill {{
+            display: inline-block;
+            margin-top: 0.5rem;
+            padding: 0.22rem 0.75rem;
+            border-radius: 999px;
+            background-color: rgba(255,255,255,0.12);
+            font-size: 0.86rem;
+        }}
+
+        .section-title {{
+            font-size: 1.35rem;
+            font-weight: 600;
+            margin-bottom: 0.1rem;
+        }}
+        .section-subtitle {{
+            font-size: 0.92rem;
+            color: #555;
+            margin-bottom: 0.5rem;
+        }}
+        .video-title {{
+            font-size: 1.02rem;
+            font-weight: 600;
+        }}
+        .video-metrics {{
+            font-size: 0.98rem;
+            color: #444;
+        }}
+        .video-desc {{
+            font-size: 0.90rem;
+            color: #555;
+        }}
+        .channel-row {{
+            font-size: 0.92rem;
+            color: #333;
+        }}
+        .channel-row img {{
+            vertical-align: middle;
+            border-radius: 50%;
+            margin-right: 6px;
+        }}
+        .rank-badge {{
+            font-weight: 600;
+            margin-right: 6px;
+            color: #888;
+        }}
+        .legend-box {{
+            background-color: #f7f7f7;
+            border-radius: 8px;
+            padding: 0.6rem 0.9rem;
+            font-size: 0.88rem;
+        }}
+        </style>
+
+        <div class="banner-wrapper">
+            <div class="banner-bg"></div>
+            <div class="banner-overlay"></div>
+            <div class="banner-content">
+                <div class="banner-title">
+                    YouTube News &amp; Politics – Trending Dashboard
+                </div>
+                <div class="banner-subtext">
+                    Showing trending News &amp; Politics videos in Canada.<br/>
+                    View counts shown are global; the YouTube Data API does not expose Canada-only viewership.
+                </div>
+                <div class="last-updated-pill">
+                    ⏱ Last updated: {last_str}
+                </div>
+            </div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
-    # Legend + API limitation explanation, clarified
-    st.markdown(
-        """
-<div style="font-size:0.9rem;color:#4b5563;margin-bottom:0.4rem;">
-  <strong>Legend:</strong>
-  🔥 ≥ 1M views &nbsp;&nbsp;·&nbsp;&nbsp; ⭐ ≥ 200K views<br>
-  <strong>Note:</strong> These videos are the <em>Trending in Canada</em> results from YouTube
-  (<code>regionCode=CA</code>, category: News & Politics). View counts shown here are
-  <strong>global totals</strong> — the YouTube Data API does not provide per-country viewership
-  (for example, Canadian-only views). The outlet filters below are based on the
-  channel’s registered country, not where the views originated.
-</div>
-""",
-        unsafe_allow_html=True,
+
+def filter_by_outlet(videos: list[dict], channel_info: dict, mode: str) -> list[dict]:
+    if mode == "Canadian outlets only":
+        return [
+            v
+            for v in videos
+            if channel_info.get(v["channel_id"], {}).get("country") == "CA"
+        ]
+    if mode == "Global (non-Canadian) outlets":
+        return [
+            v
+            for v in videos
+            if channel_info.get(v["channel_id"], {}).get("country") != "CA"
+        ]
+    return videos
+
+
+def render_video_list(
+    videos: list[dict],
+    channel_info: dict,
+    outlet_mode: str,
+    section_title: str,
+    section_desc: str,
+    max_items: int = 15,
+):
+    videos = filter_by_outlet(videos, channel_info, outlet_mode)
+    videos = videos[:max_items]
+
+    if not videos:
+        st.info("No videos match this filter yet.")
+        return
+
+    st.markdown(f'<div class="section-title">{section_title}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-subtitle">{section_desc}</div>', unsafe_allow_html=True)
+
+    for rank, v in enumerate(videos, start=1):
+        with st.container():
+            cols = st.columns([1.1, 2.3])
+            with cols[0]:
+                if v["thumbnail_url"]:
+                    st.image(v["thumbnail_url"], use_column_width=True)
+                else:
+                    st.markdown("No thumbnail")
+            with cols[1]:
+                # badges
+                hot = "🔥" if v["view_count"] >= 1_000_000 else ""
+                star = "⭐" if rank <= 3 else ""
+                rank_html = f'<span class="rank-badge">#{rank}</span>'
+                title_html = (
+                    f'<span class="video-title">'
+                    f'{rank_html}<a href="{v["url"]}" target="_blank">{v["title"]}</a> '
+                    f'{star} {hot}'
+                    f"</span>"
+                )
+                st.markdown(title_html, unsafe_allow_html=True)
+
+                now_utc = datetime.now(timezone.utc)
+                views_str = format_views(v["view_count"])
+                dur_str = format_duration(v["duration_sec"])
+                age_str = format_age(v["published_at"], now_utc)
+
+                metrics_html = (
+                    f'<div class="video-metrics">'
+                    f'👁 {views_str} views · ⏱ {dur_str} · {age_str}'
+                    f"</div>"
+                )
+                st.markdown(metrics_html, unsafe_allow_html=True)
+
+                # short description
+                desc = (v["description"] or "").replace("\n", " ")
+                if len(desc) > 220:
+                    desc = desc[:220].rsplit(" ", 1)[0] + "…"
+                if desc:
+                    desc_html = f'<div class="video-desc">{desc}</div>'
+                    st.markdown(desc_html, unsafe_allow_html=True)
+
+                # channel row
+                cinfo = channel_info.get(v["channel_id"], {}) or {}
+                origin = origin_label(cinfo.get("country"))
+                logo = cinfo.get("logo_url")
+                if logo:
+                    logo_html = f'<img src="{logo}" width="24" height="24" />'
+                else:
+                    logo_html = "🎙️"
+                ch_html = (
+                    f'<div class="channel-row">{logo_html}'
+                    f'<strong>{v["channel_title"]}</strong> · {origin}</div>'
+                )
+                st.markdown(ch_html, unsafe_allow_html=True)
+
+                # copy-ready snippet
+                snippet = (
+                    f"Title: {v['title']}\n"
+                    f"Channel: {v['channel_title']}\n"
+                    f"Views: {views_str}\n"
+                    f"Duration: {dur_str}\n"
+                    f"URL: {v['url']}\n\n"
+                    f"Description:\n{v['description']}"
+                )
+                with st.expander("Copy video details"):
+                    st.text_area(
+                        label="",
+                        value=snippet,
+                        height=140,
+                        label_visibility="collapsed",
+                    )
+
+        st.markdown("---")
+
+
+# -----------------------------
+# MAIN APP
+# -----------------------------
+
+
+def main():
+    st.set_page_config(
+        page_title="CA YouTube News Dashboard",
+        layout="wide",
+        initial_sidebar_state="collapsed",
     )
 
-    # Outlet filter toggle
-    origin_mode = st.radio(
-        "Channel origin filter:",
-        ["All outlets", "Canadian outlets only", "Global outlets (non-CA)"],
+    # Use session_state to avoid refetching too often
+    now_utc = datetime.now(timezone.utc)
+    if "videos_data" not in st.session_state or "videos_last_fetch" not in st.session_state:
+        st.session_state["videos_data"] = None
+        st.session_state["videos_last_fetch"] = None
+
+    fetch_needed = False
+    last_fetch = st.session_state["videos_last_fetch"]
+
+    # Manual refresh button
+    refresh_col, info_col = st.columns([0.22, 0.78])
+    with refresh_col:
+        if st.button("🔄 Refresh data now"):
+            fetch_needed = True
+
+    if last_fetch is None or (now_utc - last_fetch) > timedelta(hours=4):
+        fetch_needed = True
+
+    if fetch_needed:
+        with st.spinner("Fetching latest trending data from YouTube…"):
+            videos = fetch_trending_videos(max_results=50)
+            channel_ids = [v["channel_id"] for v in videos if v["channel_id"]]
+            channel_info = fetch_channel_info(channel_ids)
+            st.session_state["videos_data"] = {
+                "videos": videos,
+                "channel_info": channel_info,
+            }
+            st.session_state["videos_last_fetch"] = now_utc
+
+    data = st.session_state["videos_data"]
+    if not data:
+        st.error("Unable to load data.")
+        return
+
+    videos = data["videos"]
+    channel_info = data["channel_info"]
+    last_fetch = st.session_state["videos_last_fetch"]
+    last_fetch_et = last_fetch.astimezone(TZ_ET)
+
+    # Banner + styles
+    header_and_styles(last_fetch_et)
+
+    with info_col:
+        st.markdown(
+            "Data auto-refreshes every ~4 hours, or use the button to refresh manually.",
+        )
+
+    # Derived subsets
+    regular = [v for v in videos if not v["is_short"]]
+    shorts = [v for v in videos if v["is_short"]]
+
+    now_utc = datetime.now(timezone.utc)
+    recent = [v for v in videos if (now_utc - v["published_at"]) <= timedelta(hours=24)]
+    recent_regular = [v for v in recent if not v["is_short"]]
+    recent_shorts = [v for v in recent if v["is_short"]]
+
+    # Sort inside "recent" by views
+    recent_regular.sort(key=lambda v: v["view_count"], reverse=True)
+    recent_shorts.sort(key=lambda v: v["view_count"], reverse=True)
+
+    # Outlet filter
+    outlet_mode = st.radio(
+        "Outlet filter",
+        ["All outlets", "Canadian outlets only", "Global (non-Canadian) outlets"],
         horizontal=True,
     )
 
-    # Split into regular vs Shorts
-    base_regular_df = df[~df["is_short"]]
-    base_shorts_df = df[df["is_short"]]
+    st.markdown("")
 
-    # Last 24h section
-    now_utc = datetime.now(timezone.utc)
-    last_24_cutoff = now_utc - timedelta(hours=24)
-    base_recent_df = df[df["published_dt"] >= last_24_cutoff]
-
-    # Apply origin filter + sort
-    recent_df = filter_by_origin(base_recent_df, channel_info, origin_mode).sort_values(
-        "view_count", ascending=False
-    ).head(15)
-
-    regular_df = filter_by_origin(base_regular_df, channel_info, origin_mode).sort_values(
-        "view_count", ascending=False
-    ).head(15)
-
-    shorts_df = filter_by_origin(base_shorts_df, channel_info, origin_mode).sort_values(
-        "view_count", ascending=False
-    ).head(15)
-
-    tab_recent, tab1, tab2, tab3 = st.tabs(
-        ["⚡ Last 24 hours", "🎬 Regular Videos", "📱 Shorts", "📊 Raw Table"]
+    # Tabs
+    tab_reg, tab_short, tab_recent, tab_table = st.tabs(
+        ["Regular videos", "Shorts", "Last 24 hours", "Raw table"]
     )
 
+    with tab_reg:
+        render_video_list(
+            regular,
+            channel_info,
+            outlet_mode,
+            section_title="Top trending regular News & Politics videos in Canada",
+            section_desc=(
+                "These are YouTube’s **most popular News & Politics videos** in Canada "
+                "right now (16:9 / non-Shorts). Ranked by YouTube’s trending chart."
+            ),
+            max_items=15,
+        )
+
+    with tab_short:
+        render_video_list(
+            shorts,
+            channel_info,
+            outlet_mode,
+            section_title="Top trending YouTube Shorts – News & Politics in Canada",
+            section_desc=(
+                "Short-form vertical videos and content tagged as Shorts, "
+                "based on YouTube’s News & Politics **trending chart in Canada**."
+            ),
+            max_items=15,
+        )
+
     with tab_recent:
-        st.subheader("Top uploads from the last 24 hours")
-        st.caption(
-            "Top News & Politics videos **trending in Canada** that were uploaded in the last 24 hours, "
-            "sorted by global view count. Filtered by the channel-origin selector above."
+        st.markdown(
+            '<div class="section-title">Best News & Politics videos posted in the last 24 hours</div>',
+            unsafe_allow_html=True,
         )
-        if recent_df.empty:
-            st.info("No News & Politics uploads in the last 24 hours that match this outlet filter.")
-        else:
-            for rank, (_, row) in enumerate(recent_df.iterrows(), start=1):
-                render_card(row, channel_info, rank)
+        st.markdown(
+            '<div class="section-subtitle">'
+            "Videos published **within the last 24 hours**, ranked by global view count. "
+            "Useful for spotting very fresh stories that are starting to move."
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
-    with tab1:
-        st.subheader("Top trending regular videos")
-        st.caption(
-            "Non-Shorts News & Politics videos **currently trending on YouTube in Canada**, "
-            "sorted by global view count. Filtered by the channel-origin selector above."
-        )
-        if regular_df.empty:
-            st.info("No regular videos found for this outlet filter.")
-        else:
-            for rank, (_, row) in enumerate(regular_df.iterrows(), start=1):
-                render_card(row, channel_info, rank)
+        subtab_reg, subtab_short = st.tabs(["Regular uploads", "Shorts"])
+        with subtab_reg:
+            render_video_list(
+                recent_regular,
+                channel_info,
+                outlet_mode,
+                section_title="Top regular uploads (< 24h old)",
+                section_desc="Ranked by current global views among videos less than 24 hours old.",
+                max_items=15,
+            )
+        with subtab_short:
+            render_video_list(
+                recent_shorts,
+                channel_info,
+                outlet_mode,
+                section_title="Top Shorts (< 24h old)",
+                section_desc="Short-form News & Politics content published in the last 24 hours.",
+                max_items=15,
+            )
 
-    with tab2:
-        st.subheader("Top trending Shorts")
-        st.caption(
-            "YouTube Shorts (vertical or ≤ 75 seconds / tagged #shorts) **trending in Canada** "
-            "under the News & Politics category, sorted by global view count. "
-            "Filtered by the channel-origin selector above."
-        )
-        if shorts_df.empty:
-            st.info("No Shorts found for this outlet filter.")
-        else:
-            for rank, (_, row) in enumerate(shorts_df.iterrows(), start=1):
-                render_card(row, channel_info, rank)
+    with tab_table:
+        st.write("Underlying data (all fetched items):")
+        # Light table, without description (too long)
+        table_rows = []
+        for v in videos:
+            cinfo = channel_info.get(v["channel_id"], {}) or {}
+            table_rows.append(
+                {
+                    "title": v["title"],
+                    "channel": v["channel_title"],
+                    "country": cinfo.get("country"),
+                    "views": v["view_count"],
+                    "duration_sec": v["duration_sec"],
+                    "published_at_utc": v["published_at"],
+                    "is_short": v["is_short"],
+                    "url": v["url"],
+                }
+            )
+        st.dataframe(table_rows, use_container_width=True)
 
-    with tab3:
-        st.subheader("Raw dataset")
-        st.caption(
-            "Full set of News & Politics videos returned from the YouTube Trending API call "
-            "(region: Canada, category: News & Politics). View counts are global."
-        )
-        st.dataframe(
-            df.sort_values("view_count", ascending=False),
-            use_container_width=True,
-        )
+    st.markdown("")
+    st.markdown(
+        """
+        <div class="legend-box">
+        <strong>Legend</strong><br/>
+        ⭐ &nbsp;Top 3 video in this list<br/>
+        🔥 &nbsp;Approx. 1M+ global views (hot performance)<br/>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 if __name__ == "__main__":
