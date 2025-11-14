@@ -189,6 +189,23 @@ def load_data(api_key: str):
 # UI Helpers
 # -----------------------------
 
+def filter_by_origin(df: pd.DataFrame, channel_info: dict, mode: str) -> pd.DataFrame:
+    """Filter dataframe by outlet origin mode."""
+    if mode == "All outlets" or df.empty:
+        return df
+
+    mask = []
+    for _, row in df.iterrows():
+        cid = row.get("channel_id")
+        info = channel_info.get(cid, {}) if cid else {}
+        country = info.get("country")
+        if mode == "Canadian outlets only":
+            mask.append(country == "CA")
+        else:  # Global outlets (non-CA)
+            mask.append(country != "CA" or pd.isna(country))
+    return df[mask]
+
+
 def render_card(row, channel_info):
     """Render a single video as a modern, compact card."""
     cid = row.get("channel_id")
@@ -269,7 +286,7 @@ def render_card(row, channel_info):
             if row.get("thumbnail_url"):
                 st.image(
                     row.get("thumbnail_url"),
-                    width=220,   # about half of previous “full-width” thumbnail
+                    width=220,   # compact thumbnail
                 )
 
         with cols[1]:
@@ -325,28 +342,66 @@ def main():
         st.error("Missing YOUTUBE_API_KEY in Streamlit Secrets.")
         return
 
+    # Manual refresh button (clears cache + reruns)
+    refresh_col, _ = st.columns([0.25, 0.75])
+    with refresh_col:
+        if st.button("🔄 Refresh data now"):
+            load_data.clear()
+            st.experimental_rerun()
+
+    # Load cached data
     df, channel_info, fetched_at = load_data(api_key)
 
-    # Last updated in Eastern Time, bigger + bold
+    # Time info
     fetched_et = fetched_at.astimezone(ZoneInfo("America/Toronto"))
+    current_et = datetime.now(ZoneInfo("America/Toronto"))
+
     st.markdown(
         f"""
-<div style="font-size:1rem;font-weight:600;color:#111827;
-            margin-top:0.25rem;margin-bottom:0.75rem;">
-    Last updated: {fetched_et.strftime('%Y-%m-%d %I:%M %p ET')}
+<div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:0.25rem;margin-bottom:0.75rem;">
+  <div style="font-size:1.0rem;font-weight:600;color:#111827;">
+    📡 Data last fetched:
+    <span style="font-weight:700;">
+      {fetched_et.strftime('%Y-%m-%d %I:%M %p ET')}
+    </span>
+  </div>
+  <div style="font-size:0.95rem;color:#4b5563;">
+    ⏱ Current ET time:
+    <span style="font-variant-numeric:tabular-nums;">
+      {current_et.strftime('%Y-%m-%d %I:%M:%S %p ET')}
+    </span>
+  </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
 
+    # Outlet filter toggle
+    origin_mode = st.radio(
+        "Outlets to include:",
+        ["All outlets", "Canadian outlets only", "Global outlets (non-CA)"],
+        horizontal=True,
+    )
+
     # Split into regular vs Shorts
-    regular_df = df[~df["is_short"]].sort_values("view_count", ascending=False).head(15)
-    shorts_df = df[df["is_short"]].sort_values("view_count", ascending=False).head(15)
+    base_regular_df = df[~df["is_short"]]
+    base_shorts_df = df[df["is_short"]]
 
     # Last 24h section
     now_utc = datetime.now(timezone.utc)
     last_24_cutoff = now_utc - timedelta(hours=24)
-    recent_df = df[df["published_dt"] >= last_24_cutoff].sort_values(
+    base_recent_df = df[df["published_dt"] >= last_24_cutoff]
+
+    # Apply origin filter + sort
+    recent_df = filter_by_origin(base_recent_df, channel_info, origin_mode).sort_values(
+        "view_count", ascending=False
+    ).head(15)
+
+    regular_df = filter_by_origin(base_regular_df, channel_info, origin_mode).sort_values(
+        "view_count", ascending=False
+    ).head(15)
+
+    shorts_df = filter_by_origin(base_shorts_df, channel_info, origin_mode).sort_values(
         "view_count", ascending=False
     ).head(15)
 
@@ -355,31 +410,47 @@ def main():
     )
 
     with tab_recent:
-        st.subheader("Top News & Politics videos posted in the last 24 hours")
+        st.subheader("Top uploads from the last 24 hours")
+        st.caption(
+            "Top News & Politics videos trending in Canada that were **uploaded in the last 24 hours**, "
+            "sorted by current view count."
+        )
         if recent_df.empty:
-            st.info("No News & Politics uploads in the last 24 hours.")
+            st.info("No News & Politics uploads in the last 24 hours that match this outlet filter.")
         else:
             for _, row in recent_df.iterrows():
                 render_card(row, channel_info)
 
     with tab1:
-        st.subheader("Top trending regular videos (News & Politics · Canada)")
+        st.subheader("Top trending regular videos")
+        st.caption(
+            "Non-Shorts News & Politics videos **currently trending on YouTube in Canada** "
+            "under the News & Politics category, sorted by current view count."
+        )
         if regular_df.empty:
-            st.info("No regular videos found.")
+            st.info("No regular videos found for this outlet filter.")
         else:
             for _, row in regular_df.iterrows():
                 render_card(row, channel_info)
 
     with tab2:
         st.subheader("Top trending Shorts")
+        st.caption(
+            "YouTube Shorts (vertical or ≤ 75 seconds / tagged #shorts) **trending in Canada** "
+            "in the News & Politics category, sorted by current view count."
+        )
         if shorts_df.empty:
-            st.info("No Shorts found.")
+            st.info("No Shorts found for this outlet filter.")
         else:
             for _, row in shorts_df.iterrows():
                 render_card(row, channel_info)
 
     with tab3:
         st.subheader("Raw dataset")
+        st.caption(
+            "Full set of News & Politics videos returned from the YouTube Trending API call "
+            "(region: Canada, category: News & Politics)."
+        )
         st.dataframe(
             df.sort_values("view_count", ascending=False),
             use_container_width=True,
