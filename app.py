@@ -108,7 +108,6 @@ def truncate_description(text: str, max_chars: int = 200) -> str:
         return ""
     if len(text) <= max_chars:
         return text
-    # Try to cut on a word boundary
     cut = text[: max_chars + 1]
     cut = cut.rsplit(" ", 1)[0]
     return cut + "…"
@@ -245,7 +244,7 @@ def render_css():
 .video-card {
   border-radius: 14px;
   padding: 16px 18px;
-  margin-bottom: 18px;
+  margin-bottom: 6px;
   background-color: #14161c;
   transition: background-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
 }
@@ -347,7 +346,7 @@ def filter_by_outlet(df: pd.DataFrame, outlet_filter: str) -> pd.DataFrame:
 
 
 def render_video_list(df: pd.DataFrame, section_key: str):
-    """Render a list of videos with hover-highlight cards."""
+    """Render a list of videos with hover-highlight cards and expandable detail areas."""
     if df.empty:
         st.write("No videos found for this section right now.")
         return
@@ -376,6 +375,7 @@ def render_video_list(df: pd.DataFrame, section_key: str):
 
         views_str = format_views(views)
 
+        # Card (bubble)
         card_html = textwrap.dedent(
             f"""
 <div class="video-card">
@@ -407,30 +407,47 @@ def render_video_list(df: pd.DataFrame, section_key: str):
         )
         st.markdown(card_html, unsafe_allow_html=True)
 
-        # Copy button
-        copy_text = textwrap.dedent(
-            f"""\
-            {title}
-            Channel: {channel}
-            Origin: {origin}
-            Views: {views} ({views_str})
-            Duration: {duration_str}
-            Published: {row['published_at'].isoformat()}
-            URL: {url}
-
-            Description:
-            {row['description']}
-            """
-        )
-
-        if st.button(
-            "Copy title + details",
-            key=f"copy_{section_key}_{row['video_id']}",
+        # Details expander directly tied to this bubble
+        with st.expander(
+            "Show full description & copy details",
+            expanded=False,
+            key=f"exp_{section_key}_{row['video_id']}",
         ):
-            st.session_state[state_key] = copy_text
-        st.write("")  # small gap
+            # Full description
+            full_desc = row["description"] or ""
+            if full_desc.strip():
+                st.markdown(
+                    f"**Full description**  \n{full_desc}",
+                )
+            else:
+                st.markdown("_No description provided._")
 
-    # Section-level copy buffer in an expander
+            # Copy text for this video
+            copy_text = textwrap.dedent(
+                f"""\
+                {title}
+                Channel: {channel}
+                Origin: {origin}
+                Views: {views} ({views_str})
+                Duration: {duration_str}
+                Published: {row['published_at'].isoformat()}
+                URL: {url}
+
+                Description:
+                {full_desc}
+                """
+            )
+
+            if st.button(
+                "Copy title + details",
+                key=f"copy_{section_key}_{row['video_id']}",
+            ):
+                st.session_state[state_key] = copy_text
+                st.success("Copied into section copy buffer below ✅")
+
+        st.write("")  # spacing between videos
+
+    # Section-level copy buffer in a single expander
     buffer = st.session_state[state_key]
     if buffer:
         with st.expander(
