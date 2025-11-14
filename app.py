@@ -1,7 +1,8 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 # -----------------------------
 # Utility Functions
@@ -174,6 +175,12 @@ def load_data(api_key: str):
     videos, channel_ids = fetch_trending(api_key)
     channel_info = fetch_channel_info(api_key, channel_ids)
     df = pd.DataFrame(videos)
+
+    # Parse published_at into a timezone-aware datetime (UTC)
+    df["published_dt"] = pd.to_datetime(
+        df["published_at"], utc=True, errors="coerce"
+    )
+
     fetched_at = datetime.now(timezone.utc)
     return df, channel_info, fetched_at
 
@@ -183,7 +190,7 @@ def load_data(api_key: str):
 # -----------------------------
 
 def render_card(row, channel_info):
-    """Render a single video as a modern card."""
+    """Render a single video as a modern, compact card."""
     cid = row.get("channel_id")
     info = channel_info.get(cid, {}) if cid else {}
     logo_url = info.get("logo")
@@ -214,24 +221,29 @@ def render_card(row, channel_info):
     title = row.get("title") or "Untitled"
     url = row.get("url") or "#"
     channel_title = row.get("channel_title") or "Unknown channel"
+    description = row.get("description") or ""
+    desc_short = (description[:220] + "…") if len(description) > 220 else description
 
-    # Build card HTML (just for the right-hand side; thumbnail still uses st.image)
     meta_line = f"👁 {views_text} · ⏱ {duration_text} · 🕒 {age_text}"
     channel_line = f"{channel_title} · {origin}"
 
     right_html = f"""
-<div style="display:flex;flex-direction:column;gap:4px;">
-  <div style="font-size:1.05rem;font-weight:600;">
+<div style="display:flex;flex-direction:column;gap:6px;">
+  <div style="font-size:1.15rem;font-weight:650;line-height:1.25;">
     <a href="{url}" target="_blank"
-       style="text-decoration:none;color:#101318;">
+       style="text-decoration:none;color:#111827;">
        {title}
     </a> {badge}
   </div>
-  <div style="font-size:0.85rem;color:#6b7280;">
+  <div style="font-size:0.95rem;color:#4b5563;">
     {meta_line}
   </div>
-  <div style="display:flex;align-items:center;gap:8px;font-size:0.9rem;color:#374151;margin-top:2px;">
-    {"<img src='" + logo_url + "' style='width:20px;height:20px;border-radius:50%;object-fit:cover;'/>" if logo_url else ""}
+  <div style="font-size:0.95rem;color:#111827;margin-top:2px;">
+    {desc_short}
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;
+              font-size:0.95rem;color:#374151;margin-top:2px;">
+    {"<img src='" + logo_url + "' style='width:22px;height:22px;border-radius:50%;object-fit:cover;'/>" if logo_url else ""}
     <span>{channel_line}</span>
   </div>
 </div>
@@ -240,23 +252,24 @@ def render_card(row, channel_info):
     card_html_start = """
 <div style="
     background-color:#ffffff;
-    border-radius:14px;
-    padding:14px 18px;
-    margin-bottom:14px;
-    box-shadow:0 2px 6px rgba(15,23,42,0.08);
+    border-radius:12px;
+    padding:10px 14px;
+    margin-bottom:10px;
+    box-shadow:0 1px 4px rgba(15,23,42,0.06);
 ">
 """
     card_html_end = "</div>"
 
     with st.container():
         st.markdown(card_html_start, unsafe_allow_html=True)
-        cols = st.columns([1.5, 3])
+        # Smaller thumbnail column -> list feel
+        cols = st.columns([0.9, 3.1])
 
         with cols[0]:
             if row.get("thumbnail_url"):
                 st.image(
                     row.get("thumbnail_url"),
-                    use_column_width=True,
+                    width=220,   # about half of previous “full-width” thumbnail
                 )
 
         with cols[1]:
@@ -280,9 +293,8 @@ def main():
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background-color:#f3f4f6;
     }
-    /* tighten default padding a bit */
     section.main > div {
-        padding-top: 1rem;
+        padding-top: 0.8rem;
     }
 </style>
 """,
@@ -315,15 +327,43 @@ def main():
 
     df, channel_info, fetched_at = load_data(api_key)
 
-    st.caption(f"Last updated: {fetched_at.strftime('%Y-%m-%d %H:%M UTC')}")
+    # Last updated in Eastern Time, bigger + bold
+    fetched_et = fetched_at.astimezone(ZoneInfo("America/Toronto"))
+    st.markdown(
+        f"""
+<div style="font-size:1rem;font-weight:600;color:#111827;
+            margin-top:0.25rem;margin-bottom:0.75rem;">
+    Last updated: {fetched_et.strftime('%Y-%m-%d %I:%M %p ET')}
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
     # Split into regular vs Shorts
     regular_df = df[~df["is_short"]].sort_values("view_count", ascending=False).head(15)
     shorts_df = df[df["is_short"]].sort_values("view_count", ascending=False).head(15)
 
-    tab1, tab2, tab3 = st.tabs(["🎬 Regular Videos", "📱 Shorts", "📊 Raw Table"])
+    # Last 24h section
+    now_utc = datetime.now(timezone.utc)
+    last_24_cutoff = now_utc - timedelta(hours=24)
+    recent_df = df[df["published_dt"] >= last_24_cutoff].sort_values(
+        "view_count", ascending=False
+    ).head(15)
+
+    tab_recent, tab1, tab2, tab3 = st.tabs(
+        ["⚡ Last 24 hours", "🎬 Regular Videos", "📱 Shorts", "📊 Raw Table"]
+    )
+
+    with tab_recent:
+        st.subheader("Top News & Politics videos posted in the last 24 hours")
+        if recent_df.empty:
+            st.info("No News & Politics uploads in the last 24 hours.")
+        else:
+            for _, row in recent_df.iterrows():
+                render_card(row, channel_info)
 
     with tab1:
+        st.subheader("Top trending regular videos (News & Politics · Canada)")
         if regular_df.empty:
             st.info("No regular videos found.")
         else:
@@ -331,6 +371,7 @@ def main():
                 render_card(row, channel_info)
 
     with tab2:
+        st.subheader("Top trending Shorts")
         if shorts_df.empty:
             st.info("No Shorts found.")
         else:
@@ -338,6 +379,7 @@ def main():
                 render_card(row, channel_info)
 
     with tab3:
+        st.subheader("Raw dataset")
         st.dataframe(
             df.sort_values("view_count", ascending=False),
             use_container_width=True,
