@@ -306,7 +306,7 @@ def render_css():
 def render_banner(fetched_at_utc: datetime):
     eastern = pytz.timezone("US/Eastern")
     fetched_et = fetched_at_utc.astimezone(eastern)
-    fetched_str = fetched_et.strftime("%b %d, %Y • %I:%M %p ET")
+    fetched_str = fetched_et.strftime("%b  %d, %Y • %I:%M %p ET")
 
     st.markdown(
         textwrap.dedent(
@@ -407,12 +407,8 @@ def render_video_list(df: pd.DataFrame, section_key: str):
         )
         st.markdown(card_html, unsafe_allow_html=True)
 
-        # Details expander directly tied to this bubble
-        with st.expander(
-            "Show full description & copy details",
-            expanded=False,
-            key=f"exp_{section_key}_{row['video_id']}",
-        ):
+        # Details expander directly tied to this bubble (no key argument here)
+        with st.expander("Show full description & copy details", expanded=False):
             # Full description
             full_desc = row["description"] or ""
             if full_desc.strip():
