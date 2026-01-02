@@ -411,7 +411,6 @@ def render_video_list(df: pd.DataFrame, section_key: str, category_label: str):
         channel = row["channel_title"]
         origin = row["origin_label"]
 
-        # Keep card description as truncated multi-line (nice for reading)
         card_desc = truncate_description(one_line(row["description"] or ""), max_chars=200)
 
         star = " ⭐" if rank <= 3 else ""
@@ -451,17 +450,17 @@ def render_video_list(df: pd.DataFrame, section_key: str, category_label: str):
         )
         st.markdown(card_html, unsafe_allow_html=True)
 
-        # CLEAN copy block (exact format requested)
         with st.expander("Details (copy)", expanded=False):
             clean_desc = truncate_description(one_line(row["description"] or ""), max_chars=200)
 
+            # ✅ ONLY CHANGE: add URL to the copy block (last line)
             copy_block = (
                 f"{views_str} views - {channel} - Posted {age_str} - Trending #{rank} - {category_label}\n\n"
                 f"{title}\n\n"
-                f"{clean_desc}"
+                f"{clean_desc}\n\n"
+                f"{url}"
             )
 
-            # st.code is very copy-friendly (click-drag + copy; also looks clean)
             st.code(copy_block, language=None)
 
         st.write("")
@@ -480,7 +479,6 @@ def main():
 
     render_css()
 
-    # Top row: refresh button + caption
     top_cols = st.columns([1, 3])
     with top_cols[0]:
         if st.button("🔄 Refresh now"):
@@ -492,12 +490,10 @@ def main():
             "Use the button to force a fresh API call."
         )
 
-    # Fetch trending data
     df, _, fetched_at_utc = fetch_trending_videos()
 
     render_banner(fetched_at_utc)
 
-    # Outlet filter + legend
     st.markdown("**Outlet filter**")
     outlet_choice = st.radio(
         "",
@@ -516,7 +512,6 @@ def main():
 
     category_label = outlet_label_from_filter(outlet_filter)
 
-    # Tabs
     tab_regular, tab_shorts, tab_24h, tab_hot, tab_raw = st.tabs(
         ["Regular videos", "Shorts", "Last 24 hours", "Hot (last 8 hours)", "Raw table"]
     )
