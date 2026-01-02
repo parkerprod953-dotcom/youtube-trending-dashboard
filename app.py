@@ -120,6 +120,18 @@ def truncate_description(text: str, max_chars: int = 200) -> str:
 # -----------------------------
 
 
+@st.cache_data(ttl=60 * 60 * 4, show_spinner=True)
+def fetch_trending_videos():
+    """Fetch trending News & Politics videos in CA and enrich them."""
+    params = {
+        "part": "snippet,statistics,contentDetails",
+        "chart": "mostPopular",
+        "regionCode": REGION_CODE,
+        "videoCategoryId": CATEGORY_NEWS_POLITICS,
+        "maxResults": 50,
+    }
+    data = yt_get("videos", params)
+
     videos = []
     channel_ids = set()
 
