@@ -1,12 +1,14 @@
 import html
 import re
 import textwrap
+import json
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import pytz
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 # -----------------------------
 # Basic config
@@ -238,29 +240,69 @@ def render_css():
 html, body {
   background-color: #02030a !important;
 }
-.stApp {
-  background: radial-gradient(circle at top, #202642 0, #050711 45%, #02030a 100%) !important;
-  color: #ffffff;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
-}
-header[data-testid="stHeader"] {
-  background: transparent !important;
-}
-div[data-testid="stDecoration"] {
-  background: transparent !important;
+section.main > div {
+  padding-top: 1.2rem;
 }
 
-/* Main content width tweak */
+/* Remove top whitespace bar */
+header[data-testid="stHeader"] { background: rgba(0,0,0,0) !important; }
+div[data-testid="stToolbar"] { right: 2rem; }
+
+/* ====== MAIN BACKGROUND ====== */
+.stApp {
+  background: radial-gradient(1200px 800px at 15% 10%, rgba(255,75,75,0.18), transparent 60%),
+              radial-gradient(1000px 700px at 85% 15%, rgba(255,159,67,0.14), transparent 55%),
+              radial-gradient(1200px 900px at 50% 100%, rgba(70,90,255,0.10), transparent 65%),
+              #02030a;
+  color: #e5e9ff;
+}
+
+/* ====== HEADERS / TEXT ====== */
+h1, h2, h3, h4 {
+  letter-spacing: 0.02em;
+}
+a { color: #a7c3ff; }
+a:hover { color: #ffffff; }
+
+/* ====== CARDS / CONTAINERS ====== */
 .block-container {
-  padding-top: 1.5rem;
-  padding-bottom: 3rem;
   max-width: 1200px;
+}
+.video-card {
+  border-radius: 16px;
+  padding: 16px 18px;
+  background: rgba(10, 14, 28, 0.65);
+  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 10px 26px rgba(0,0,0,0.50);
+  margin-bottom: 12px;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+.video-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 34px rgba(0,0,0,0.65);
+  border-color: rgba(255,255,255,0.10);
+}
+.video-thumb img {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.07);
+}
+
+/* ====== EXPANDER ====== */
+details {
+  border-radius: 12px;
+  background: rgba(6, 9, 18, 0.55);
+  border: 1px solid rgba(255,255,255,0.06);
+  padding: 6px 10px;
+}
+summary {
+  color: #e5e9ff !important;
+  font-weight: 650;
 }
 
 /* ====== TABS ====== */
 .stTabs [data-baseweb="tab-list"] {
-  gap: 0.35rem;
-  border-bottom: none !important;
+  gap: 8px;
 }
 .stTabs [data-baseweb="tab"] {
   background-color: #080b16;
@@ -351,45 +393,6 @@ div[data-testid="stDecoration"] {
   line-height: 1.6;
 }
 
-/* ====== VIDEO CARDS / BUBBLES ====== */
-.video-card {
-  border-radius: 16px;
-  padding: 16px 18px;
-  margin-bottom: 10px;
-  background: radial-gradient(circle at top left, #20263b 0, #111522 60%, #090b14 100%);
-  border: 1px solid rgba(255,255,255,0.05);
-  transition: background-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
-}
-.video-card:hover {
-  background: radial-gradient(circle at top left, #323b5c 0, #151a2a 60%, #0b0f1b 100%);
-  box-shadow: 0 18px 40px rgba(0,0,0,0.75);
-  transform: translateY(-2px);
-  border-color: rgba(255,255,255,0.12);
-}
-.video-thumb img {
-  border-radius: 12px;
-  display: block;
-}
-.video-meta {
-  font-size: 13px;
-  color: #c9d3f5;
-}
-.video-desc {
-  font-size: 13px;
-  color: #e0e0e0;
-}
-
-/* ====== EXPANDERS ====== */
-.streamlit-expanderHeader {
-  font-size: 0.9rem;
-  color: #d5daf9;
-}
-.streamlit-expander {
-  border-radius: 12px !important;
-  border: 1px solid rgba(255,255,255,0.05) !important;
-  background-color: #0d101b !important;
-}
-
 /* ====== SCROLLBAR ====== */
 ::-webkit-scrollbar {
   width: 8px;
@@ -418,26 +421,26 @@ def render_banner(fetched_at_utc: datetime):
     st.markdown(
         textwrap.dedent(
             f"""
-<div class="hero">
-  <img src="{BANNER_URL}" class="hero-bg">
-  <div class="hero-overlay">
-    <div class="hero-title">YouTube News &amp; Politics – Trending Dashboard</div>
-    <div class="hero-sub" style="margin-top:10px;">
-      Showing trending <b>News &amp; Politics</b> videos in Canada (YouTube region <b>CA</b>).
-      View counts shown are <b>global</b>; the YouTube Data API does not expose Canada-only
-      viewership, so rankings follow the CA trending chart.
-      <br><br>
-      The <span style="color:#ffb347;">🔥 Hot (last 8 hours)</span> section looks only at
-      videos uploaded in the last 8 hours and ranks them by <b>views per hour since upload</b>
-      (current view count ÷ hours online) as a proxy for fastest-rising stories.
-    </div>
-    <div style="margin-top:18px;font-size:13px;color:#e9eefc;">
-      <span style="padding:6px 12px;border-radius:999px;background:rgba(0,0,0,0.45);">
-        ⏱ Last updated: <b>{fetched_str}</b>
-      </span>
-    </div>
-  </div>
-</div>
+ <div class="hero">
+   <img src="{BANNER_URL}" class="hero-bg">
+   <div class="hero-overlay">
+     <div class="hero-title">YouTube News &amp; Politics – Trending Dashboard</div>
+     <div class="hero-sub" style="margin-top:10px;">
+       Showing trending <b>News &amp; Politics</b> videos in Canada (YouTube region <b>CA</b>).
+       View counts shown are <b>global</b>; the YouTube Data API does not expose Canada-only
+       viewership, so rankings follow the CA trending chart.
+       <br><br>
+       The <span style="color:#ffb347;">🔥 Hot (last 8 hours)</span> section looks only at
+       videos uploaded in the last 8 hours and ranks them by <b>views per hour since upload</b>
+       (current view count ÷ hours online) as a proxy for fastest-rising stories.
+     </div>
+     <div style="margin-top:18px;font-size:13px;color:#e9eefc;">
+       <span style="padding:6px 12px;border-radius:999px;background:rgba(0,0,0,0.45);">
+         ⏱ Last updated: <b>{fetched_str}</b>
+       </span>
+     </div>
+   </div>
+ </div>
             """
         ),
         unsafe_allow_html=True,
@@ -480,65 +483,101 @@ def render_video_list(df: pd.DataFrame, section_key: str):
         # Card (bubble)
         card_html = textwrap.dedent(
             f"""
-<div class="video-card">
-  <div style="display:flex;gap:18px;align-items:flex-start;">
-    <div class="video-thumb" style="flex:0 0 260px;">
-      <a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer">
-        <img src="{thumb}" alt="thumbnail">
-      </a>
-    </div>
-    <div style="flex:1;min-width:0;">
-      <div style="font-size:13px;color:#9ba4c9;margin-bottom:2px;">#{rank}</div>
-      <a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer"
-         style="font-size:17px;font-weight:600;color:#e5f0ff;text-decoration:none;">
-        {html.escape(title)}{badge}
-      </a>
-      <div class="video-meta" style="margin-top:4px;">
-        👁 {views_str} &nbsp; ⏱ {duration_str} &nbsp; 🕒 {age_str}
-      </div>
-      <div style="margin-top:3px;font-size:13px;color:#c4c9ea;">
-        {html.escape(channel)} · {origin}
-      </div>
-      <div class="video-desc" style="margin-top:8px;">
-        {html.escape(short_desc)}
-      </div>
-    </div>
-  </div>
-</div>
+ <div class="video-card">
+   <div style="display:flex;gap:18px;align-items:flex-start;">
+     <div class="video-thumb" style="flex:0 0 260px;">
+       <a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer">
+         <img src="{thumb}" alt="thumbnail">
+       </a>
+     </div>
+     <div style="flex:1;min-width:0;">
+       <div style="font-size:13px;color:#9ba4c9;margin-bottom:2px;">#{rank}</div>
+       <a href="{html.escape(url)}" target="_blank" rel="noopener noreferrer"
+          style="font-size:17px;font-weight:600;color:#e5f0ff;text-decoration:none;">
+         {html.escape(title)}{badge}
+       </a>
+       <div class="video-meta" style="margin-top:4px;">
+         👁 {views_str} &nbsp; ⏱ {duration_str} &nbsp; 🕒 {age_str}
+       </div>
+       <div style="margin-top:3px;font-size:13px;color:#c4c9ea;">
+         {html.escape(channel)} · {origin}
+       </div>
+       <div class="video-desc" style="margin-top:8px;">
+         {html.escape(short_desc)}
+       </div>
+     </div>
+   </div>
+ </div>
             """
         )
         st.markdown(card_html, unsafe_allow_html=True)
 
-        # Per-video expander with full description + copy text
-        with st.expander("Show full description & copy details", expanded=False):
-            full_desc = row["description"] or ""
-            if full_desc.strip():
-                st.markdown(f"**Full description**  \n{full_desc}")
+        # Per-video expander with copy-ready markdown + auto-copy
+        with st.expander("Show copy-ready details", expanded=False):
+            # Limit description to 2 sentences for cleaner copy/paste
+            def _two_sentences(text: str) -> str:
+                t = (text or "").strip()
+                if not t:
+                    return ""
+                t = re.sub(r"\s+", " ", t)
+                parts = re.split(r"(?<=[.!?])\s+", t)
+                return " ".join(parts[:2]).strip()
+
+            full_desc = _two_sentences(row.get("description", ""))
+
+            # Context label for the "Trending #" line
+            if origin == "Canadian outlet":
+                context_label = "among Canadian outlets"
+            elif origin == "Non-Canadian outlet":
+                context_label = "among non-Canadian outlets"
             else:
-                st.markdown("_No description provided._")
+                context_label = "overall"
 
-            copy_text = textwrap.dedent(
+            copy_md = textwrap.dedent(
                 f"""\
-                {title}
-                Channel: {channel}
-                Origin: {origin}
-                Views: {views} ({views_str})
-                Duration: {duration_str}
-                Published: {row['published_at'].isoformat()}
-                URL: {url}
+                ## {views_str} views - {channel} - Posted {age_str} - Trending #{rank} ({context_label})
 
-                Description:
-                {full_desc}
+                **[{title}]({url})**
+
+                *{full_desc if full_desc else 'No description provided.'}*
                 """
+            ).strip()
+
+            # Rendered preview (formatted markdown)
+            st.markdown(copy_md)
+
+            # Auto-copy button (clipboard)
+            components.html(
+                f"""
+                <div style="margin:6px 0 10px 0;">
+                  <button
+                    style="border-radius:999px;padding:8px 14px;border:none;cursor:pointer;
+                           background:linear-gradient(135deg,#ff4b4b,#ff9f43);color:white;
+                           font-weight:650;"
+                    onclick="navigator.clipboard.writeText({json.dumps(copy_md)}).then(() => {{
+                      const el = document.getElementById('copystatus_{section_key}_{row['video_id']}');
+                      if (el) el.innerText = 'Copied ✅';
+                      setTimeout(() => {{ if (el) el.innerText = ''; }}, 1500);
+                    }});"
+                  >
+                    Copy to clipboard
+                  </button>
+                  <span id="copystatus_{section_key}_{row['video_id']}" style="margin-left:10px;color:#c4cff5;"></span>
+                </div>
+                """,
+                height=60,
             )
 
-            st.markdown("**Copy-ready details** (select all and copy):")
+            # Copy box (fallback / easy select-all)
             st.text_area(
-                "",
-                copy_text,
-                height=160,
+                "Copy (select all):",
+                copy_md,
+                height=180,
                 key=f"copy_area_{section_key}_{row['video_id']}",
             )
+
+            # Raw markdown (exact text that will paste elsewhere)
+            st.code(copy_md, language="markdown")
 
         st.write("")  # extra spacing between cards
 
@@ -581,49 +620,64 @@ def main():
         horizontal=True,
         label_visibility="collapsed",
     )
-    if outlet_choice.startswith("All"):
-        outlet_filter = "All"
-    elif outlet_choice.startswith("Canadian"):
+    if outlet_choice == "Canadian outlets only":
         outlet_filter = "Canadian only"
-    else:
+    elif outlet_choice == "Global (non-Canadian) outlets":
         outlet_filter = "Global"
+    else:
+        outlet_filter = "All"
 
-    st.markdown(
-        "🔎 **Legend:** ⭐ Top-3 within this list · 🔥 1M+ total views",
-    )
+    # Search box
+    search = st.text_input("Search titles/descriptions (optional)", "")
+
+    if search.strip():
+        q = search.strip().lower()
+        df = df[
+            df["title"].str.lower().str.contains(q)
+            | df["description"].str.lower().str.contains(q)
+        ].copy()
 
     # Tabs
-    tab_regular, tab_shorts, tab_24h, tab_hot, tab_raw = st.tabs(
-        ["Regular videos", "Shorts", "Last 24 hours", "Hot (last 8 hours)", "Raw table"]
+    tab_trending, tab_shorts, tab_long, tab_24, tab_hot, tab_raw = st.tabs(
+        [
+            "🔥 Trending (Top 15)",
+            "🎯 Shorts",
+            "🎬 Regular videos",
+            "🕒 Last 24 hours",
+            "⚡ Hot (last 8 hours)",
+            "🧾 Raw table",
+        ]
     )
 
-    # Regular videos
-    with tab_regular:
+    # Trending top 15
+    with tab_trending:
         st.markdown(
-            "### Top trending regular News & Politics videos in Canada\n"
-            "These are News & Politics videos in the CA trending chart that look like "
-            "regular 16:9 videos (not Shorts). Ranked by current global view count."
+            "### 🔥 Top 15 trending News & Politics videos (CA)\n"
+            "Ranked by YouTube’s **trending chart** (region CA)."
         )
-        dfr = df[~df["is_short"]].sort_values("view_count", ascending=False)
-        dfr = filter_by_outlet(dfr, outlet_filter)
-        render_video_list(dfr.head(15), section_key="regular")
+        dft = df.copy()
+        dft = filter_by_outlet(dft, outlet_filter)
+        render_video_list(dft.head(15), section_key="trend")
 
     # Shorts
     with tab_shorts:
-        st.markdown(
-            "### Top trending News & Politics Shorts in Canada\n"
-            "Likely YouTube Shorts (very short runtime or #shorts in title/description), "
-            "ranked by current global view count."
-        )
-        dfs = df[df["is_short"]].sort_values("view_count", ascending=False)
+        st.markdown("### 🎯 Shorts (Top 15)")
+        dfs = df[df["is_short"]].copy()
         dfs = filter_by_outlet(dfs, outlet_filter)
         render_video_list(dfs.head(15), section_key="shorts")
 
+    # Regular videos
+    with tab_long:
+        st.markdown("### 🎬 Regular videos (Top 15)")
+        dfl = df[~df["is_short"]].copy()
+        dfl = filter_by_outlet(dfl, outlet_filter)
+        render_video_list(dfl.head(15), section_key="long")
+
     # Last 24 hours
-    with tab_24h:
+    with tab_24:
         st.markdown(
-            "### Top News & Politics uploads from the last 24 hours\n"
-            "Videos uploaded in the past 24 hours, ranked by current global view count."
+            "### 🕒 Last 24 hours (Top 15 by views)\n"
+            "Videos uploaded in the last 24 hours, ranked by **current view count**."
         )
         cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
         df24 = df[df["published_at"] >= cutoff_24h].copy()
@@ -674,5 +728,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
