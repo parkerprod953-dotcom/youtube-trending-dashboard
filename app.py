@@ -1,3 +1,6 @@
+import streamlit as st
+st.error("DEPLOY CHECK: app.py is live ✅")
+
 import html
 import re
 import textwrap
