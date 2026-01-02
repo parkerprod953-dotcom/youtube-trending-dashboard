@@ -452,11 +452,20 @@ def filter_by_outlet(df: pd.DataFrame, outlet_filter: str) -> pd.DataFrame:
     return df
 
 
-def render_video_list(df: pd.DataFrame, section_key: str, category_label: str):
+def render_video_list(df: pd.DataFrame, section_key: str):
     """Render a list of videos with hover-highlight cards and expandable detail areas."""
     if df.empty:
         st.write("No videos found for this section right now.")
         return
+
+    # Outlet-filter context (for the expander copy block)
+    outlet_ui = st.session_state.get("outlet_choice_ui", "All outlets")
+    if outlet_ui == "Canadian outlets only":
+        filter_context = "Category: among Canadian outlets"
+    elif outlet_ui == "Global (non-Canadian) outlets":
+        filter_context = "Category: among non-Canadian outlets"
+    else:
+        filter_context = "Category: overall (all outlets)"
 
     for idx, row in df.reset_index(drop=True).iterrows():
         rank = idx + 1
@@ -509,33 +518,20 @@ def render_video_list(df: pd.DataFrame, section_key: str, category_label: str):
         )
         st.markdown(card_html, unsafe_allow_html=True)
 
-        # ✅ Updated dropdown details to reflect the ACTIVE FILTER category label
-        with st.expander("Show full description & copy details", expanded=False):
-            full_desc = row["description"] or ""
+        # ✅ UPDATED: Dropdown details (copy-friendly markdown block)
+        with st.expander("Details (click to copy)", expanded=False):
+            copy_block = textwrap.dedent(
+                f"""\
+                ## {views_str} views — {channel} — Posted {age_str} — Trending #{rank} ({filter_context})
 
-            # Copy-friendly description: short, two-line-ish
-            desc_two_lines = truncate_description(
-                full_desc.replace("\n", " ").strip(),
-                max_chars=220
-            )
+                TITLE: **[{title}]({url})**
 
-            # Copy-ready markdown block (st.code has a built-in copy button)
-            copy_md = (
-                f"## {views_str} views - {channel} - Posted {age_str} - Trending #{rank} "
-                f"(Category: {category_label})\n"
-                f"**[{title}]({url})**\n"
-                f"*{desc_two_lines}*"
-            )
+                DESCRIPTION: *{short_desc}*
+                """
+            ).strip()
 
-            st.markdown("**Copy-ready block:**")
-            st.code(copy_md, language="markdown")
-
-            # Full description below
-            if full_desc.strip():
-                st.markdown("**Full description:**")
-                st.write(full_desc)
-            else:
-                st.markdown("_No description provided._")
+            # This is the copyable portion (no text_area label warnings, super easy to copy)
+            st.code(copy_block, language="markdown")
 
         st.write("")  # extra spacing between cards
 
@@ -578,15 +574,16 @@ def main():
         horizontal=True,
         label_visibility="collapsed",
     )
+
+    # Store the UI choice so the dropdown details can reflect it
+    st.session_state["outlet_choice_ui"] = outlet_choice
+
     if outlet_choice.startswith("All"):
         outlet_filter = "All"
-        category_label = "overall (all outlets)"
     elif outlet_choice.startswith("Canadian"):
         outlet_filter = "Canadian only"
-        category_label = "among Canadian outlets"
     else:
         outlet_filter = "Global"
-        category_label = "among non-Canadian outlets"
 
     st.markdown(
         "🔎 **Legend:** ⭐ Top-3 within this list · 🔥 1M+ total views",
@@ -606,7 +603,7 @@ def main():
         )
         dfr = df[~df["is_short"]].sort_values("view_count", ascending=False)
         dfr = filter_by_outlet(dfr, outlet_filter)
-        render_video_list(dfr.head(15), section_key="regular", category_label=category_label)
+        render_video_list(dfr.head(15), section_key="regular")
 
     # Shorts
     with tab_shorts:
@@ -617,7 +614,7 @@ def main():
         )
         dfs = df[df["is_short"]].sort_values("view_count", ascending=False)
         dfs = filter_by_outlet(dfs, outlet_filter)
-        render_video_list(dfs.head(15), section_key="shorts", category_label=category_label)
+        render_video_list(dfs.head(15), section_key="shorts")
 
     # Last 24 hours
     with tab_24h:
@@ -629,7 +626,7 @@ def main():
         df24 = df[df["published_at"] >= cutoff_24h].copy()
         df24 = df24.sort_values("view_count", ascending=False)
         df24 = filter_by_outlet(df24, outlet_filter)
-        render_video_list(df24.head(15), section_key="last24", category_label=category_label)
+        render_video_list(df24.head(15), section_key="last24")
 
     # Hot last 8 hours
     with tab_hot:
@@ -642,7 +639,7 @@ def main():
         df8 = df[df["published_at"] >= cutoff_8h].copy()
         df8 = filter_by_outlet(df8, outlet_filter)
         df8 = df8.sort_values("views_per_hour", ascending=False)
-        render_video_list(df8.head(15), section_key="hot8", category_label=category_label)
+        render_video_list(df8.head(15), section_key="hot8")
 
     # Raw table
     with tab_raw:
